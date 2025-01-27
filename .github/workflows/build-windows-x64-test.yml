@@ -1,0 +1,42 @@
+name: Build Windows x64
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version string for the build (e.g., 1.0.0)"
+        required: false
+      sign:
+        description: "Sign the build (true/false)"
+        required: false
+        default: "false"
+
+jobs:
+  windows:
+    name: Build Windows x64
+    runs-on: windows-2022
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 16
+          cache: "yarn"
+
+      - name: Install Dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build Native Dependencies
+        run: yarn build:native --target x86_64-pc-windows-msvc
+
+      - name: Build Windows Application
+        run: |
+          yarn electron-builder --publish never -w --x64
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-build
+          path: dist/
