@@ -10,6 +10,11 @@ on:
         options:
           - x64
           - ia32
+  #push:
+  #  branches: [ main ]
+  #  paths:
+  #    - 'package.json'
+  #    - 'yarn.lock'
 
 jobs:
   build:
@@ -19,52 +24,6 @@ jobs:
     
     steps:
       - uses: actions/checkout@v4
-
-      # Cache Rust tools and build artifacts
-      - name: Cache Rust dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-rust-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-rust-
-
-      # Cache native modules
-      - name: Cache native modules
-        uses: actions/cache@v4
-        with:
-          path: .hak
-          key: ${{ runner.os }}-${{ inputs.arch }}-hak-${{ hashFiles('package.json') }}-${{ hashFiles('yarn.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ inputs.arch }}-hak-
-
-      # Cache node_modules
-      - name: Get yarn cache directory path
-        id: yarn-cache-dir-path
-        run: echo "dir=$(yarn cache dir)" >> $GITHUB_OUTPUT
-
-      - name: Cache yarn dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ steps.yarn-cache-dir-path.outputs.dir }}
-            node_modules
-            */*/node_modules
-          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-yarn-
-
-      # Cache electron download
-      - name: Cache electron download
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/electron
-          key: ${{ runner.os }}-electron-${{ hashFiles('package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-electron-
 
       - name: Set up build tools
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
@@ -121,7 +80,7 @@ jobs:
 
       - name: Build App
         run: |
-          yarn electron-builder --publish never -w ${{ github.event.inputs.arch == 'ia32' && '--ia32' || '' }} --win --config.win.certificateSubjectName="AGVY Code Signing" --config.win.certificatePassword="${{ secrets.CERT_PASSWORD }}"
+          yarn electron-builder --publish never -w ${{ github.event.inputs.arch == 'ia32' && '--ia32' || '' }} --win --config.win.signtoolOptions.certificateThumbprint="FF9FD43311082686D49A0DDA3AF4C2CE9C3BD321" --config.win.signtoolOptions.certificatePassword="${{ secrets.CERT_PASSWORD }}"
 
       - name: Verify Signature
         run: |
