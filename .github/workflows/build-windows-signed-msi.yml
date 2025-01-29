@@ -1,4 +1,4 @@
-name: Build Windows MSI - Signed
+name: Build Windows MSI
 on:
   workflow_dispatch:
     inputs:
@@ -83,7 +83,6 @@ jobs:
           yarn electron-builder --publish never -w ${{ github.event.inputs.arch == 'ia32' && '--ia32' || '' }} --win --config.win.certificateFile="" --config.win.certificatePassword="${{ secrets.CERT_PASSWORD }}"
 
       - name: Verify Signature
-        if: ${{ secrets.SIGNING_CERT != '' }}
         run: |
           Get-AuthenticodeSignature "dist/**/*.msi" | Select-Object -Property Path,Status,SignerCertificate | Format-List
 
@@ -92,4 +91,4 @@ jobs:
         with:
           name: element-desktop-${{ github.event.inputs.arch || 'x64' }}-msi
           path: dist/**/*.msi
-          retention-days: 1
+          retention-days: 5
