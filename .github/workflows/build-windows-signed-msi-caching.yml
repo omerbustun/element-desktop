@@ -1,0 +1,135 @@
+name: Build Windows MSI - Signed, Caching
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: 'Architecture to build'
+        required: true
+        default: 'x64'
+        type: choice
+        options:
+          - x64
+          - ia32
+
+jobs:
+  build:
+    runs-on: windows-2022
+    env:
+      SIGNTOOL_PATH: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.22000.0/x86/signtool.exe"
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cache Rust tools and build artifacts
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-rust-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-rust-
+
+      # Cache native modules
+      - name: Cache native modules
+        uses: actions/cache@v4
+        with:
+          path: .hak
+          key: ${{ runner.os }}-${{ inputs.arch }}-hak-${{ hashFiles('package.json') }}-${{ hashFiles('yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ inputs.arch }}-hak-
+
+      # Cache node_modules
+      - name: Get yarn cache directory path
+        id: yarn-cache-dir-path
+        run: echo "dir=$(yarn cache dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache yarn dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.yarn-cache-dir-path.outputs.dir }}
+            node_modules
+            */*/node_modules
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
+      # Cache electron download
+      - name: Cache electron download
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: ${{ runner.os }}-electron-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-
+
+      - name: Set up build tools
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
+        with:
+          arch: ${{ github.event.inputs.arch || 'x64' }}
+
+      - name: Install tclsh
+        shell: pwsh
+        run: |
+          choco install -y magicsplat-tcl-tk --no-progress
+          echo "${HOME}/AppData/Local/Apps/Tcl86/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install NetWide Assembler
+        shell: pwsh
+        run: |
+          choco install -y nasm --no-progress
+          echo "C:/Program Files/NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustup target add ${{ github.event.inputs.arch == 'ia32' && 'i686-pc-windows-msvc' || 'x86_64-pc-windows-msvc' }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+          cache: 'yarn'
+
+      - name: Install Dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Fetch Element Web
+        run: yarn run fetch --noverify --cfgdir ""
+
+      - name: Build Native Modules
+        run: |
+          refreshenv
+          yarn build:native --target ${{ github.event.inputs.arch == 'ia32' && 'i686-pc-windows-msvc' || 'x86_64-pc-windows-msvc' }}
+
+      - name: Build TypeScript and Resources
+        run: |
+          yarn run build:ts
+          yarn run build:res
+
+      - name: Import Code Signing Certificate
+        run: |
+          $pfx_b64 = "${{ secrets.SIGNING_CERT }}"
+          $pfx_cert = [System.Convert]::FromBase64String($pfx_b64)
+          $certPath = "signing-cert.pfx"
+          [IO.File]::WriteAllBytes($certPath, $pfx_cert)
+          Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString -String "${{ secrets.CERT_PASSWORD }}" -Force -AsPlainText)
+          Remove-Item -Path $certPath
+
+      - name: Build App
+        run: |
+          yarn electron-builder --publish never -w ${{ github.event.inputs.arch == 'ia32' && '--ia32' || '' }} --win --config.win.certificateSubjectName="AGVY Code Signing" --config.win.certificatePassword="${{ secrets.CERT_PASSWORD }}"
+
+      - name: Verify Signature
+        run: |
+          Get-AuthenticodeSignature "dist/**/*.msi" | Select-Object -Property Path,Status,SignerCertificate | Format-List
+
+      - name: Upload MSI Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: element-desktop-${{ github.event.inputs.arch || 'x64' }}-msi
+          path: dist/**/*.msi
+          retention-days: 1
