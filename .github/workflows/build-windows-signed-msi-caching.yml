@@ -10,20 +10,50 @@ on:
         options:
           - x64
           - ia32
-  #push:
-  #  branches: [ main ]
-  #  paths:
-  #    - 'package.json'
-  #    - 'yarn.lock'
 
 jobs:
   build:
     runs-on: windows-2022
     env:
       SIGNTOOL_PATH: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.22000.0/x86/signtool.exe"
-    
+
     steps:
       - uses: actions/checkout@v4
+
+      # Cache Yarn Dependencies
+      - name: Cache Yarn Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.yarn/cache
+            node_modules
+          key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+          restore-keys: |
+            yarn-${{ runner.os }}-
+
+      # Cache Rust Cargo (for native builds)
+      - name: Cache Rust Build Artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      # Cache Electron Build Cache
+      - name: Cache Electron Build Artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.electron
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: electron-${{ runner.os }}-${{ hashFiles('package.json') }}
+          restore-keys: |
+            electron-${{ runner.os }}-
 
       - name: Set up build tools
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
@@ -80,7 +110,7 @@ jobs:
 
       - name: Build App
         run: |
-          arn electron-builder --publish never -w ${{ github.event.inputs.arch == 'ia32' && '--ia32' || '' }} --win --config.win.certificateSubjectName="${{ secrets.CERT_SUBJECT_NAME }}" --config.win.certificatePassword="${{ secrets.CERT_PASSWORD }}"
+          yarn electron-builder --publish never -w ${{ github.event.inputs.arch == 'ia32' && '--ia32' || '' }} --win --config.win.certificateSubjectName="${{ secrets.CERT_SUBJECT_NAME }}" --config.win.certificatePassword="${{ secrets.CERT_PASSWORD }}"
 
       - name: Verify Signature
         run: |
