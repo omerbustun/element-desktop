@@ -16,6 +16,8 @@ jobs:
     runs-on: windows-2022
     env:
       SIGNTOOL_PATH: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.22000.0/x86/signtool.exe"
+      CSC_LINK: ${{ secrets.SIGNING_CERT }}
+      CSC_KEY_PASSWORD: ${{ secrets.CERT_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
@@ -99,18 +101,9 @@ jobs:
           yarn run build:ts
           yarn run build:res
 
-      - name: Import Code Signing Certificate
-        run: |
-          $pfx_b64 = "${{ secrets.SIGNING_CERT }}"
-          $pfx_cert = [System.Convert]::FromBase64String($pfx_b64)
-          $certPath = "signing-cert.pfx"
-          [IO.File]::WriteAllBytes($certPath, $pfx_cert)
-          Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString -String "${{ secrets.CERT_PASSWORD }}" -Force -AsPlainText)
-          Remove-Item -Path $certPath
-
       - name: Build App
         run: |
-          yarn electron-builder --publish never -w ${{ github.event.inputs.arch == 'ia32' && '--ia32' || '' }} --win --config.win.certificateSubjectName="${{ secrets.CERT_SUBJECT_NAME }}" --config.win.certificatePassword="${{ secrets.CERT_PASSWORD }}"
+          yarn electron-builder --publish never -w ${{ github.event.inputs.arch == 'ia32' && '--ia32' || '' }}
 
       - name: Verify Signature
         run: |
