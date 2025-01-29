@@ -80,7 +80,7 @@ jobs:
 
       - name: Build App
         run: |
-          yarn electron-builder --publish never -w ${{ github.event.inputs.arch == 'ia32' && '--ia32' || '' }} --win --config.win.signtoolOptions.certificateThumbprint="FF9FD43311082686D49A0DDA3AF4C2CE9C3BD321" --config.win.signtoolOptions.certificatePassword="${{ secrets.CERT_PASSWORD }}"
+          arn electron-builder --publish never -w ${{ github.event.inputs.arch == 'ia32' && '--ia32' || '' }} --win --config.win.certificateSubjectName="${{ secrets.CERT_SUBJECT_NAME }}" --config.win.certificatePassword="${{ secrets.CERT_PASSWORD }}"
 
       - name: Verify Signature
         run: |
