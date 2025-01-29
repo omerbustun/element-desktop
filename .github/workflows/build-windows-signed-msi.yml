@@ -80,7 +80,7 @@ jobs:
 
       - name: Build App
         run: |
-          yarn electron-builder --publish never -w ${{ github.event.inputs.arch == 'ia32' && '--ia32' || '' }} --win --config.win.certificateFile="" --config.win.certificatePassword="${{ secrets.CERT_PASSWORD }}"
+          yarn electron-builder --publish never -w ${{ github.event.inputs.arch == 'ia32' && '--ia32' || '' }} --win --config.win.sign-hooks.cscName="${{ secrets.CERT_NAME }}" --config.win.certificatePassword="${{ secrets.CERT_PASSWORD }}"
 
       - name: Verify Signature
         run: |
@@ -91,4 +91,4 @@ jobs:
         with:
           name: element-desktop-${{ github.event.inputs.arch || 'x64' }}-msi
           path: dist/**/*.msi
-          retention-days: 5
+          retention-days: 1
