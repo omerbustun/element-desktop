@@ -1,4 +1,4 @@
-name: Build Windows MSI
+name: Build Windows MSI - Signed
 on:
   workflow_dispatch:
     inputs:
