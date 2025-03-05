@@ -15,13 +15,11 @@ import type { DependencyInfo } from "./dep.js";
 import { loadJsonFile } from "../../src/utils.js";
 import packageJson from "../../package.json";
 
-const GENERALCOMMANDS = ["target"];
-
 // These can only be run on specific modules
 const MODULECOMMANDS = ["check", "fetch", "link", "build", "copy", "clean"];
 
 // Shortcuts for multiple commands at once (useful for building universal binaries
-// because you can run the fetch/fetchDeps/build for each arch and then copy/link once)
+// because you can run the fetch/build for each arch and then copy/link once)
 const METACOMMANDS: Record<string, string[]> = {
     fetchandbuild: ["check", "fetch", "build"],
     copyandlink: ["copy", "link"],
@@ -90,7 +88,8 @@ async function main(): Promise<void> {
 
         for (const s of HAKSCRIPTS) {
             if (hakJson.scripts?.[s]) {
-                const scriptModule = await import(path.join("file://", prefix, "hak", dep, hakJson.scripts[s]));
+                // Shockingly, using path.join and backslashes here doesn't work on Windows
+                const scriptModule = await import(`../../hak/${dep}/${hakJson.scripts[s]}`);
                 if (scriptModule.default) {
                     deps[dep].scripts[s] = scriptModule.default;
                 } else {
@@ -119,13 +118,6 @@ async function main(): Promise<void> {
     if (modules.length === 0) modules = Object.keys(deps);
 
     for (const cmd of cmds) {
-        if (GENERALCOMMANDS.includes(cmd)) {
-            if (cmd === "target") {
-                console.log(hakEnv.getNodeTriple());
-            }
-            return;
-        }
-
         if (!MODULECOMMANDS.includes(cmd)) {
             console.error("Unknown command: " + cmd);
             console.log("Commands I know about:");

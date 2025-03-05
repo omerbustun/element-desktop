@@ -10,7 +10,7 @@ Please see LICENSE files in the repository root for full details.
 
 // Squirrel on windows starts the app with various flags as hooks to tell us when we've been installed/uninstalled etc.
 import "./squirrelhooks.js";
-import { app, BrowserWindow, Menu, autoUpdater, protocol, dialog, Input, Event, session } from "electron";
+import { app, BrowserWindow, Menu, autoUpdater, protocol, dialog, type Input, type Event, session } from "electron";
 // eslint-disable-next-line n/file-extension-in-import
 import * as Sentry from "@sentry/electron/main";
 import AutoLaunch from "auto-launch";
@@ -22,7 +22,6 @@ import { URL, fileURLToPath } from "node:url";
 import minimist from "minimist";
 
 import "./ipc.js";
-import "./keytar.js";
 import "./seshat.js";
 import "./settings.js";
 import * as tray from "./tray.js";
