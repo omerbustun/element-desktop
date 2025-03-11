@@ -9,7 +9,7 @@ on:
         type: choice
         options:
           - x64
-          - ia32
+          - x86
   #push:
   #  branches: [ main ]
   #  paths:
@@ -48,7 +48,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal --no-self-update
           rustup default stable
-          rustup target add ${{ github.event.inputs.arch == 'ia32' && 'i686-pc-windows-msvc' || 'x86_64-pc-windows-msvc' }}
+          rustup target add ${{ github.event.inputs.arch == 'x86' && 'i686-pc-windows-msvc' || 'x86_64-pc-windows-msvc' }}
 
       - uses: actions/setup-node@v4
         with:
@@ -64,7 +64,7 @@ jobs:
       - name: Build Native Modules
         run: |
           refreshenv
-          yarn build:native --target ${{ github.event.inputs.arch == 'ia32' && 'i686-pc-windows-msvc' || 'x86_64-pc-windows-msvc' }}
+          yarn build:native --target ${{ github.event.inputs.arch == 'x86' && 'i686-pc-windows-msvc' || 'x86_64-pc-windows-msvc' }}
 
       - name: Build TypeScript and Resources
         run: |
@@ -73,7 +73,7 @@ jobs:
 
       - name: Build App
         run: |
-          yarn electron-builder --publish never -w ${{ github.event.inputs.arch == 'ia32' && '--ia32' || '' }}
+          yarn electron-builder --publish never -w ${{ github.event.inputs.arch == 'x86' && '--x86' || '' }}
 
       - name: Upload MSI Artifact
         uses: actions/upload-artifact@v4
