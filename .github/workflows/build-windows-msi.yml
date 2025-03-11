@@ -28,7 +28,7 @@ jobs:
       - name: Set up build tools
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
         with:
-          arch: ${{ github.event.inputs.arch || 'x64' }}
+          arch: "${{ github.event.inputs.arch == 'ia32' ? 'x86' : github.event.inputs.arch }}"
 
       # Install TCL (needed for native modules)
       - name: Install tclsh
@@ -73,7 +73,7 @@ jobs:
 
       - name: Build App
         run: |
-          yarn electron-builder --publish never -w ${{ github.event.inputs.arch == 'x86' && '--x86' || '' }}
+          yarn electron-builder --publish never -w ${{ github.event.inputs.arch == 'ia32' ? '--ia32' : '' }}
 
       - name: Upload MSI Artifact
         uses: actions/upload-artifact@v4
