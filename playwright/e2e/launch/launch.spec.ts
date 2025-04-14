@@ -11,16 +11,18 @@ import { platform } from "node:os";
 import { test, expect } from "../../element-desktop-test.js";
 
 declare global {
+    interface ElectronPlatform {
+        getEventIndexingManager():
+            | {
+                  supportsEventIndexing(): Promise<boolean>;
+              }
+            | undefined;
+        createPickleKey(userId: string, deviceId: string): Promise<string | null>;
+    }
+
     interface Window {
         mxPlatformPeg: {
-            get(): {
-                getEventIndexingManager():
-                    | {
-                          supportsEventIndexing(): Promise<boolean>;
-                      }
-                    | undefined;
-                createPickleKey(userId: string, deviceId: string): Promise<string | null>;
-            };
+            get(): ElectronPlatform;
         };
     }
 }
@@ -54,5 +56,17 @@ test.describe("App launch", () => {
                 return await window.mxPlatformPeg.get().createPickleKey("@user:server", "ABCDEF");
             }),
         ).resolves.not.toBeNull();
+    });
+
+    test.describe("--no-update", () => {
+        test.use({
+            extraArgs: ["--no-update"],
+        });
+
+        // XXX: this test works fine locally but in CI the app start races with the test plumbing up the stdout/stderr pipes
+        // which means the logs are missed, disabling for now.
+        test.skip("should respect option", async ({ page, stdout }) => {
+            expect(stdout.data.toString()).toContain("Auto update disabled via command line flag");
+        });
     });
 });

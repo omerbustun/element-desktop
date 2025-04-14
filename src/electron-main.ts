@@ -44,7 +44,12 @@ const argv = minimist(process.argv, {
 if (argv["help"]) {
     console.log("Options:");
     console.log("  --profile-dir {path}: Path to where to store the profile.");
-    console.log("  --profile {name}:     Name of alternate profile to use, allows for running multiple accounts.");
+    console.log(
+        `  --profile {name}:     Name of alternate profile to use, allows for running multiple accounts.\n` +
+            `                         Ignored if --profile-dir is specified.\n` +
+            `                         The ELEMENT_PROFILE_DIR environment variable may be used to change the default profile path.\n` +
+            `                         It is overridden by --profile-dir, but can be combined with --profile.`,
+    );
     console.log("  --devtools:           Install and use react-devtools and react-perf.");
     console.log(
         `  --config:             Path to the config.json file. May also be specified via the ELEMENT_DESKTOP_CONFIG_JSON environment variable.\n` +
@@ -75,7 +80,7 @@ if (userDataPathInProtocol) {
 } else if (argv["profile-dir"]) {
     userDataPath = argv["profile-dir"];
 } else {
-    let newUserDataPath = app.getPath("userData");
+    let newUserDataPath = process.env.ELEMENT_PROFILE_DIR ?? app.getPath("userData");
     if (argv["profile"]) {
         newUserDataPath += "-" + argv["profile"];
     }
@@ -436,8 +441,9 @@ app.on("ready", async () => {
         });
     });
 
-    if (argv["no-update"]) {
-        console.log('Auto update disabled via command line flag "--no-update"');
+    // Minimist parses `--no-`-prefixed arguments as booleans with value `false` rather than verbatim.
+    if (argv["update"] === false) {
+        console.log("Auto update disabled via command line flag");
     } else if (global.vectorConfig["update_base_url"]) {
         console.log(`Starting auto update with base URL: ${global.vectorConfig["update_base_url"]}`);
         void updater.start(global.vectorConfig["update_base_url"]);
