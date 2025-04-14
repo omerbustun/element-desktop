@@ -1,4 +1,4 @@
-name: Build Windows MSI Test
+name: Build Windows MSI Tag
 on:
   workflow_dispatch:
     inputs:
@@ -10,21 +10,25 @@ on:
         options:
           - x64
           - ia32
-  #push:
-  #  branches: [ main ]
-  #  paths:
-  #    - 'package.json'
-  #    - 'yarn.lock'
-
+      tag:
+        description: 'Tag to build (from original repo)'
+        required: true
+        type: string
 jobs:
   build:
     runs-on: windows-2022
     env:
       SIGNTOOL_PATH: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.22000.0/x86/signtool.exe"
+      ORIGINAL_REPO: "element-hq/element-desktop"
     
     steps:
-      - uses: actions/checkout@v4
-
+      - name: Checkout fork
+        uses: actions/checkout@v4
+      - name: Fetch tag from original repo
+        run: |
+          git remote add upstream https://github.com/${{ env.ORIGINAL_REPO }}.git
+          git fetch upstream --tags
+          git checkout ${{ github.event.inputs.tag }}
       # Set up build tools for 32-bit (using "x86")
       - name: Set up build tools (32-bit)
         if: ${{ github.event.inputs.arch == 'ia32' }}
