@@ -78,35 +78,35 @@ jobs:
         run: corepack enable
 
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Fetch Element Web
-        run: yarn run fetch --noverify --cfgdir ""
+        run: pnpm run fetch --noverify --cfgdir ""
 
       - name: Build Native Modules (32-bit)
         if: ${{ github.event.inputs.arch == 'ia32' }}
         run: |
           refreshenv
-          yarn build:native --target i686-pc-windows-msvc
+          pnpm build:native --target i686-pc-windows-msvc
 
       - name: Build Native Modules (64-bit)
         if: ${{ github.event.inputs.arch != 'ia32' }}
         run: |
           refreshenv
-          yarn build:native --target x86_64-pc-windows-msvc
+          pnpm build:native --target x86_64-pc-windows-msvc
 
       - name: Build TypeScript and Resources
         run: |
-          yarn run build:ts
-          yarn run build:res
+          pnpm run build:ts
+          pnpm run build:res
 
       - name: Build App (32-bit)
         if: ${{ github.event.inputs.arch == 'ia32' }}
-        run: yarn electron-builder --publish never -w --ia32
+        run: pnpm electron-builder --publish never -w --ia32
 
       - name: Build App (64-bit)
         if: ${{ github.event.inputs.arch != 'ia32' }}
-        run: yarn electron-builder --publish never -w
+        run: pnpm electron-builder --publish never -w
 
       - name: Upload MSI Artifact
         uses: actions/upload-artifact@v4
