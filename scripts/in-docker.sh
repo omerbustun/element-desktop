@@ -1,12 +1,18 @@
 #!/bin/bash
 
+set -e
+
+cd $(dirname "$0")/..
+
 IMAGE=${DOCKER_IMAGE_NAME:-"element-desktop-dockerbuild"}
 
 docker inspect "$IMAGE" 2> /dev/null > /dev/null
 if [ $? != 0 ]; then
-    echo "Docker image $IMAGE not found. Have you run yarn run docker:setup?"
+    echo "Docker image $IMAGE not found. Have you run pnpm run docker:setup?"
     exit 1
 fi
+
+mkdir -p docker/node_modules docker/.hak docker/.gnupg
 
 # Taken from https://www.electron.build/multi-platform-build#docker
 # Pass through any vars prefixed with INDOCKER_, removing the prefix

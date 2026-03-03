@@ -1,5 +1,5 @@
 /*
-Copyright 2018-2024 New Vector Ltd.
+Copyright 2018-2025 New Vector Ltd.
 Copyright 2017-2019 Michael Telatynski <7t3chguy@gmail.com>
 Copyright 2016 Aviral Dasgupta
 Copyright 2016 OpenMarket Ltd
@@ -10,13 +10,22 @@ Please see LICENSE files in the repository root for full details.
 
 // Squirrel on windows starts the app with various flags as hooks to tell us when we've been installed/uninstalled etc.
 import "./squirrelhooks.js";
-import { app, BrowserWindow, Menu, autoUpdater, protocol, dialog, type Input, type Event, session } from "electron";
+import {
+    app,
+    BrowserWindow,
+    Menu,
+    autoUpdater,
+    dialog,
+    type Input,
+    type Event,
+    session,
+    protocol,
+    desktopCapturer,
+} from "electron";
 // eslint-disable-next-line n/file-extension-in-import
 import * as Sentry from "@sentry/electron/main";
-import AutoLaunch from "auto-launch";
 import path, { dirname } from "node:path";
 import windowStateKeeper from "electron-window-state";
-import Store from "electron-store";
 import fs, { promises as afs } from "node:fs";
 import { URL, fileURLToPath } from "node:url";
 import minimist from "minimist";
@@ -24,16 +33,19 @@ import minimist from "minimist";
 import "./ipc.js";
 import "./seshat.js";
 import "./settings.js";
+import "./badge.js";
 import * as tray from "./tray.js";
+import Store from "./store.js";
 import { buildMenuTemplate } from "./vectormenu.js";
 import webContentsHandler from "./webcontents-handler.js";
 import * as updater from "./updater.js";
-import { getProfileFromDeeplink, protocolInit } from "./protocol.js";
+import ProtocolHandler from "./protocol.js";
 import { _t, AppLocalization } from "./language-helper.js";
 import { setDisplayMediaCallback } from "./displayMediaCallback.js";
 import { setupMacosTitleBar } from "./macos-titlebar.js";
-import { loadJsonFile } from "./utils.js";
+import { type Json, loadJsonFile } from "./utils.js";
 import { setupMediaAuth } from "./media-auth.js";
+import { readBuildConfig } from "./build-config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -63,6 +75,7 @@ if (argv["help"]) {
 }
 
 const LocalConfigLocation = process.env.ELEMENT_DESKTOP_CONFIG_JSON ?? argv["config"];
+const LocalConfigFilename = "config.json";
 
 // Electron creates the user data directory (with just an empty 'Dictionaries' directory...)
 // as soon as the app path is set, so pick a random path in it that must exist if it's a
@@ -71,10 +84,13 @@ function isRealUserDataDir(d: string): boolean {
     return fs.existsSync(path.join(d, "IndexedDB"));
 }
 
+const buildConfig = readBuildConfig();
+const protocolHandler = new ProtocolHandler(buildConfig.protocol);
+
 // check if we are passed a profile in the SSO callback url
 let userDataPath: string;
 
-const userDataPathInProtocol = getProfileFromDeeplink(argv["_"]);
+const userDataPathInProtocol = protocolHandler.getProfileFromDeeplink(argv["_"]);
 if (userDataPathInProtocol) {
     userDataPath = userDataPathInProtocol;
 } else if (argv["profile-dir"]) {
@@ -141,60 +157,86 @@ function getAsarPath(): Promise<string> {
     return asarPathPromise;
 }
 
-// Loads the config from asar, and applies a config.json from userData atop if one exists
-// Writes config to `global.vectorConfig`. Does nothing if `global.vectorConfig` is already set.
-async function loadConfig(): Promise<void> {
-    if (global.vectorConfig) return;
-
-    const asarPath = await getAsarPath();
-
-    try {
-        global.vectorConfig = loadJsonFile(asarPath, "config.json");
-    } catch {
-        // it would be nice to check the error code here and bail if the config
-        // is unparsable, but we get MODULE_NOT_FOUND in the case of a missing
-        // file or invalid json, so node is just very unhelpful.
-        // Continue with the defaults (ie. an empty config)
-        global.vectorConfig = {};
+function loadLocalConfigFile(): Json {
+    if (LocalConfigLocation) {
+        console.log("Loading local config: " + LocalConfigLocation);
+        return loadJsonFile(LocalConfigLocation);
+    } else {
+        const configDir = app.getPath("userData");
+        console.log(`Loading local config: ${path.join(configDir, LocalConfigFilename)}`);
+        return loadJsonFile(configDir, LocalConfigFilename);
     }
+}
 
-    try {
-        // Load local config and use it to override values from the one baked with the build
-        const localConfig = LocalConfigLocation
-            ? loadJsonFile(LocalConfigLocation)
-            : loadJsonFile(app.getPath("userData"), "config.json");
+let loadConfigPromise: Promise<void> | undefined;
+// Loads the config from asar, and applies a config.json from userData atop if one exists
+// Writes config to `global.vectorConfig`. Idempotent, returns the same promise on subsequent calls.
+function loadConfig(): Promise<void> {
+    if (loadConfigPromise) return loadConfigPromise;
 
-        // If the local config has a homeserver defined, don't use the homeserver from the build
-        // config. This is to avoid a problem where Riot thinks there are multiple homeservers
-        // defined, and panics as a result.
-        if (Object.keys(localConfig).find((k) => homeserverProps.includes(<any>k))) {
-            // Rip out all the homeserver options from the vector config
-            global.vectorConfig = Object.keys(global.vectorConfig)
-                .filter((k) => !homeserverProps.includes(<any>k))
-                .reduce(
-                    (obj, key) => {
-                        obj[key] = global.vectorConfig[key];
-                        return obj;
-                    },
-                    {} as Omit<Partial<(typeof global)["vectorConfig"]>, keyof typeof homeserverProps>,
-                );
+    async function actuallyLoadConfig(): Promise<void> {
+        const asarPath = await getAsarPath();
+
+        try {
+            console.log(`Loading app config: ${path.join(asarPath, LocalConfigFilename)}`);
+            global.vectorConfig = loadJsonFile(asarPath, LocalConfigFilename);
+        } catch {
+            // it would be nice to check the error code here and bail if the config
+            // is unparsable, but we get MODULE_NOT_FOUND in the case of a missing
+            // file or invalid json, so node is just very unhelpful.
+            // Continue with the defaults (ie. an empty config)
+            global.vectorConfig = {};
         }
 
-        global.vectorConfig = Object.assign(global.vectorConfig, localConfig);
-    } catch (e) {
-        if (e instanceof SyntaxError) {
-            void dialog.showMessageBox({
-                type: "error",
-                title: `Your ${global.vectorConfig.brand || "Element"} is misconfigured`,
-                message:
-                    `Your custom ${global.vectorConfig.brand || "Element"} configuration contains invalid JSON. ` +
-                    `Please correct the problem and reopen ${global.vectorConfig.brand || "Element"}.`,
-                detail: e.message || "",
+        try {
+            // Load local config and use it to override values from the one baked with the build
+            const localConfig = loadLocalConfigFile();
+
+            // If the local config has a homeserver defined, don't use the homeserver from the build
+            // config. This is to avoid a problem where Riot thinks there are multiple homeservers
+            // defined, and panics as a result.
+            if (Object.keys(localConfig).find((k) => homeserverProps.includes(<any>k))) {
+                // Rip out all the homeserver options from the vector config
+                global.vectorConfig = Object.keys(global.vectorConfig)
+                    .filter((k) => !homeserverProps.includes(<any>k))
+                    .reduce(
+                        (obj, key) => {
+                            obj[key] = global.vectorConfig[key];
+                            return obj;
+                        },
+                        {} as Omit<Partial<(typeof global)["vectorConfig"]>, keyof typeof homeserverProps>,
+                    );
+            }
+
+            global.vectorConfig = Object.assign(global.vectorConfig, localConfig);
+        } catch (e) {
+            if (e instanceof SyntaxError) {
+                await app.whenReady();
+                void dialog.showMessageBox({
+                    type: "error",
+                    title: `Your ${global.vectorConfig.brand || "Element"} is misconfigured`,
+                    message:
+                        `Your custom ${global.vectorConfig.brand || "Element"} configuration contains invalid JSON. ` +
+                        `Please correct the problem and reopen ${global.vectorConfig.brand || "Element"}.`,
+                    detail: e.message || "",
+                });
+            }
+
+            // Could not load local config, this is expected in most cases.
+        }
+
+        // Tweak modules paths as they assume the root is at the same level as webapp, but for `vector://vector/webapp` it is not.
+        if (Array.isArray(global.vectorConfig.modules)) {
+            global.vectorConfig.modules = global.vectorConfig.modules.map((m) => {
+                if (m.startsWith("/")) {
+                    return "/webapp" + m;
+                }
+                return m;
             });
         }
-
-        // Could not load local config, this is expected in most cases.
     }
+    loadConfigPromise = actuallyLoadConfig();
+    return loadConfigPromise;
 }
 
 // Configure Electron Sentry and crashReporter using sentry.dsn in config.json if one is present.
@@ -212,57 +254,18 @@ async function configureSentry(): Promise<void> {
     }
 }
 
-// Set up globals for Tray and AutoLaunch
+// Set up globals for Tray
 async function setupGlobals(): Promise<void> {
     const asarPath = await getAsarPath();
     await loadConfig();
 
-    // we assume the resources path is in the same place as the asar
-    const resPath = await tryPaths("res", path.dirname(asarPath), [
-        // If run from the source checkout
-        "res",
-        // if run from packaged application
-        "",
-    ]);
-
-    // The tray icon
-    // It's important to call `path.join` so we don't end up with the packaged asar in the final path.
-    const iconFile = `element.${process.platform === "win32" ? "ico" : "png"}`;
+    // Figure out the tray icon path & brand name
+    const iconFile = `icon.${process.platform === "win32" ? "ico" : "png"}`;
     global.trayConfig = {
-        icon_path: path.join(resPath, "img", iconFile),
+        icon_path: path.join(path.dirname(asarPath), "build", iconFile),
         brand: global.vectorConfig.brand || "Element",
     };
-
-    // launcher
-    global.launcher = new AutoLaunch({
-        name: global.vectorConfig.brand || "Element",
-        isHidden: true,
-        mac: {
-            useLaunchAgent: true,
-        },
-    });
 }
-
-// Look for an auto-launcher under 'Riot' and if we find one,
-// port its enabled/disabled-ness over to the new 'Element' launcher
-async function moveAutoLauncher(): Promise<void> {
-    if (!global.vectorConfig.brand || global.vectorConfig.brand === "Element") {
-        const oldLauncher = new AutoLaunch({
-            name: "Riot",
-            isHidden: true,
-            mac: {
-                useLaunchAgent: true,
-            },
-        });
-        const wasEnabled = await oldLauncher.isEnabled();
-        if (wasEnabled) {
-            await oldLauncher.disable();
-            await global.launcher.enable();
-        }
-    }
-}
-
-global.store = new Store({ name: "electron-config" });
 
 global.appQuitting = false;
 
@@ -272,32 +275,6 @@ const exitShortcuts: Array<(input: Input, platform: string) => boolean> = [
     (input, platform): boolean =>
         platform === "darwin" && input.meta && !input.control && input.key.toUpperCase() === "Q",
 ];
-
-const warnBeforeExit = (event: Event, input: Input): void => {
-    const shouldWarnBeforeExit = global.store.get("warnBeforeExit", true);
-    const exitShortcutPressed =
-        input.type === "keyDown" && exitShortcuts.some((shortcutFn) => shortcutFn(input, process.platform));
-
-    if (shouldWarnBeforeExit && exitShortcutPressed && global.mainWindow) {
-        const shouldCancelCloseRequest =
-            dialog.showMessageBoxSync(global.mainWindow, {
-                type: "question",
-                buttons: [
-                    _t("action|cancel"),
-                    _t("action|close_brand", {
-                        brand: global.vectorConfig.brand || "Element",
-                    }),
-                ],
-                message: _t("confirm_quit"),
-                defaultId: 1,
-                cancelId: 0,
-            }) === 0;
-
-        if (shouldCancelCloseRequest) {
-            event.preventDefault();
-        }
-    }
-};
 
 void configureSentry();
 
@@ -323,7 +300,7 @@ if (!gotLock) {
 }
 
 // do this after we know we are the primary instance of the app
-protocolInit();
+protocolHandler.initialise(userDataPath);
 
 // Register the scheme the app is served from as 'standard'
 // which allows things like relative URLs and IndexedDB to
@@ -355,19 +332,22 @@ app.enableSandbox();
 // We disable media controls here. We do this because calls use audio and video elements and they sometimes capture the media keys. See https://github.com/vector-im/element-web/issues/15704
 app.commandLine.appendSwitch("disable-features", "HardwareMediaKeyHandling,MediaSessionService");
 
+const store = Store.initialize(argv["storage-mode"]); // must be called before any async actions
+
 // Disable hardware acceleration if the setting has been set.
-if (global.store.get("disableHardwareAcceleration", false) === true) {
+if (store.get("disableHardwareAcceleration")) {
     console.log("Disabling hardware acceleration.");
     app.disableHardwareAcceleration();
 }
 
 app.on("ready", async () => {
+    console.debug("Reached Electron ready state");
+
     let asarPath: string;
 
     try {
         asarPath = await getAsarPath();
         await setupGlobals();
-        await moveAutoLauncher();
     } catch (e) {
         console.log("App setup failed: exiting", e);
         process.exit(1);
@@ -445,11 +425,16 @@ app.on("ready", async () => {
     if (argv["update"] === false) {
         console.log("Auto update disabled via command line flag");
     } else if (global.vectorConfig["update_base_url"]) {
-        console.log(`Starting auto update with base URL: ${global.vectorConfig["update_base_url"]}`);
         void updater.start(global.vectorConfig["update_base_url"]);
     } else {
         console.log("No update_base_url is defined: auto update is disabled");
     }
+
+    // Set up i18n before loading storage as we need translations for dialogs
+    global.appLocalization = new AppLocalization({
+        components: [(): void => tray.initApplicationMenu(), (): void => Menu.setApplicationMenu(buildMenuTemplate())],
+        store,
+    });
 
     // Load the previous window state with fallback to defaults
     const mainWindowState = windowStateKeeper({
@@ -457,6 +442,7 @@ app.on("ready", async () => {
         defaultHeight: 768,
     });
 
+    console.debug("Opening main window");
     const preloadScript = path.normalize(`${__dirname}/preload.cjs`);
     global.mainWindow = new BrowserWindow({
         // https://www.electronjs.org/docs/faq#the-font-looks-blurry-what-is-this-and-what-can-i-do
@@ -467,7 +453,7 @@ app.on("ready", async () => {
 
         icon: global.trayConfig.icon_path,
         show: false,
-        autoHideMenuBar: global.store.get("autoHideMenuBar", true),
+        autoHideMenuBar: store.get("autoHideMenuBar"),
 
         x: mainWindowState.x,
         y: mainWindowState.y,
@@ -481,6 +467,17 @@ app.on("ready", async () => {
             webgl: true,
         },
     });
+
+    global.mainWindow.setContentProtection(store.get("enableContentProtection"));
+
+    try {
+        console.debug("Ensuring storage is ready");
+        if (!(await store.prepareSafeStorage(global.mainWindow.webContents.session))) return;
+    } catch (e) {
+        console.error(e);
+        app.exit(1);
+    }
+
     void global.mainWindow.loadURL("vector://vector/webapp/");
 
     if (process.platform === "darwin") {
@@ -489,10 +486,10 @@ app.on("ready", async () => {
 
     // Handle spellchecker
     // For some reason spellCheckerEnabled isn't persisted, so we have to use the store here
-    global.mainWindow.webContents.session.setSpellCheckerEnabled(global.store.get("spellCheckerEnabled", true));
+    global.mainWindow.webContents.session.setSpellCheckerEnabled(store.get("spellCheckerEnabled", true));
 
     // Create trayIcon icon
-    if (global.store.get("minimizeToTray", true)) tray.create(global.trayConfig);
+    if (store.get("minimizeToTray")) tray.create(global.trayConfig);
 
     global.mainWindow.once("ready-to-show", () => {
         if (!global.mainWindow) return;
@@ -506,7 +503,38 @@ app.on("ready", async () => {
         }
     });
 
-    global.mainWindow.webContents.on("before-input-event", warnBeforeExit);
+    global.mainWindow.webContents.on("before-input-event", (event: Event, input: Input): void => {
+        const exitShortcutPressed =
+            input.type === "keyDown" && exitShortcuts.some((shortcutFn) => shortcutFn(input, process.platform));
+
+        // We only care about the exit shortcuts here
+        if (!exitShortcutPressed || !global.mainWindow) return;
+
+        // Prevent the default behaviour
+        event.preventDefault();
+
+        // Let's ask the user if they really want to exit the app
+        const shouldWarnBeforeExit = store.get("warnBeforeExit", true);
+        if (shouldWarnBeforeExit) {
+            const shouldCancelCloseRequest =
+                dialog.showMessageBoxSync(global.mainWindow, {
+                    type: "question",
+                    buttons: [
+                        _t("action|cancel"),
+                        _t("action|close_brand", {
+                            brand: global.vectorConfig.brand || "Element",
+                        }),
+                    ],
+                    message: _t("confirm_quit"),
+                    defaultId: 1,
+                    cancelId: 0,
+                }) === 0;
+            if (shouldCancelCloseRequest) return;
+        }
+
+        // Exit the app
+        app.exit();
+    });
 
     global.mainWindow.on("closed", () => {
         global.mainWindow = null;
@@ -544,15 +572,28 @@ app.on("ready", async () => {
 
     webContentsHandler(global.mainWindow.webContents);
 
-    global.appLocalization = new AppLocalization({
-        store: global.store,
-        components: [(): void => tray.initApplicationMenu(), (): void => Menu.setApplicationMenu(buildMenuTemplate())],
-    });
-
-    session.defaultSession.setDisplayMediaRequestHandler((_, callback) => {
-        global.mainWindow?.webContents.send("openDesktopCapturerSourcePicker");
-        setDisplayMediaCallback(callback);
-    });
+    session.defaultSession.setDisplayMediaRequestHandler(
+        (_, callback) => {
+            if (process.env.XDG_SESSION_TYPE === "wayland") {
+                // On Wayland, calling getSources() opens the xdg-desktop-portal picker.
+                // The user can only select a single source there, so Electron will return an array with exactly one entry.
+                desktopCapturer
+                    .getSources({ types: ["screen", "window"] })
+                    .then((sources) => {
+                        callback({ video: sources[0] });
+                    })
+                    .catch((err) => {
+                        // If the user cancels the dialog an error occurs "Failed to get sources"
+                        console.error("Wayland: failed to get user-selected source:", err);
+                        callback({ video: { id: "", name: "" } }); // The promise does not return if no dummy is passed here as source
+                    });
+            } else {
+                global.mainWindow?.webContents.send("openDesktopCapturerSourcePicker");
+            }
+            setDisplayMediaCallback(callback);
+        },
+        { useSystemPicker: true },
+    ); // Use Mac OS 15+ native picker
 
     setupMediaAuth(global.mainWindow);
 });
@@ -585,8 +626,9 @@ app.on("second-instance", (ev, commandLine, workingDirectory) => {
     }
 });
 
-// Set the App User Model ID to match what the squirrel
-// installer uses for the shortcut icon.
-// This makes notifications work on windows 8.1 (and is
-// a noop on other platforms).
-app.setAppUserModelId("com.squirrel.element-desktop.Element");
+// This is required to make notification handlers work
+// on Windows 8.1/10/11 (and is a noop on other platforms);
+// It must also match the ID found in 'electron-builder'
+// in order to get the title and icon to show up correctly.
+// Ref: https://stackoverflow.com/a/77314604/3525780
+app.setAppUserModelId(buildConfig.appId);

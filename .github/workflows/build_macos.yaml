@@ -15,6 +15,10 @@ on:
             APPLE_CSC_LINK:
                 required: false
         inputs:
+            ref:
+                type: string
+                required: false
+                description: "The git ref to checkout, defaults to the default branch"
             version:
                 type: string
                 required: false
@@ -27,21 +31,66 @@ on:
                 type: string
                 required: false
                 description: "The URL to which the output will be deployed."
+            blob_report:
+                type: boolean
+                required: false
+                description: "Whether to run the blob report"
+            prepare-artifact-name:
+                type: string
+                required: false
+                description: |
+                    The name of the prepare artifact to use, defaults to 'webapp'.
+                    The artifact must contain the following:
+                    + webapp.asar - the asar archive of the webapp to embed in the desktop app
+                    + electronVersion - the version of electron to use for cache keying
+                    + hakHash - the hash of the .hak directory to use for cache keying
+                    + variant.json - the variant configuration to use for the build
+
+                    The artifact can also contain any additional files which will be applied as overrides to the checkout root before building,
+                    for example icons in the `build/` directory to override the app icons.
+                default: "webapp"
+            test:
+                type: boolean
+                required: false
+                default: true
+                description: "Whether to run the test stage after building"
+            test-args:
+                type: string
+                required: false
+                description: "Additional arguments to pass to playwright"
+            artifact-prefix:
+                type: string
+                required: false
+                description: "An optional prefix to add to the artifact name, useful for distinguishing builds in private repos."
+                default: ""
+            targets:
+                type: string
+                required: false
+                description: "List of targets to build"
+                default: "dmg zip"
 permissions: {} # No permissions required
 jobs:
     build:
-        runs-on: macos-14 # M1
+        name: Build macOS Universal
+        runs-on: macos-15 # M1
         environment: ${{ inputs.sign && 'packages.element.io' || '' }}
         steps:
-            - uses: actions/checkout@v4
-
-            - uses: actions/download-artifact@v4
+            - uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1
               with:
-                  name: webapp
+                  xcode-version: latest-stable
+
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+              with:
+                  repository: element-hq/element-desktop
+                  ref: ${{ inputs.ref }}
+
+            - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+              with:
+                  name: ${{ inputs.prepare-artifact-name }}
 
             - name: Cache .hak
               id: cache
-              uses: actions/cache@v4
+              uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
               with:
                   key: ${{ runner.os }}-${{ hashFiles('hakHash', 'electronVersion') }}
                   path: |
@@ -56,39 +105,41 @@ jobs:
                   rustup target add x86_64-apple-darwin
 
             # M1 macos-14 comes without Python preinstalled
-            - uses: actions/setup-python@v5
+            - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
               with:
                   python-version: "3.13"
 
-            - uses: actions/setup-node@v4
+            # Install Quartz for DMG badges
+            # https://github.com/electron-userland/electron-builder/issues/9511#issuecomment-3774092888
+            - run: sudo pip3 install pyobjc-framework-Quartz
+
+            - uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
+            - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6
               with:
                   node-version-file: .node-version
-                  cache: "yarn"
+                  cache: "pnpm"
 
             - name: Install Deps
-              run: "yarn install --frozen-lockfile"
-
-            # Python 3.12 drops distutils which keytar relies on
-            - name: Install setuptools
-              run: pip3 install setuptools
+              run: "pnpm install --frozen-lockfile"
 
             - name: Build Natives
               if: steps.cache.outputs.cache-hit != 'true'
-              run: yarn build:native:universal
+              run: pnpm build:native:universal
 
             # We split these because electron-builder gets upset if we set CSC_LINK even to an empty string
             - name: "[Signed] Build App"
               if: inputs.sign != ''
               run: |
-                  yarn build:universal --publish never
+                  pnpm build:universal --publish never -m ${{ inputs.targets }}
               env:
                   APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
                   APPLE_ID: ${{ secrets.APPLE_ID }}
                   APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
                   CSC_KEY_PASSWORD: ${{ secrets.APPLE_CSC_KEY_PASSWORD }}
                   CSC_LINK: ${{ secrets.APPLE_CSC_LINK }}
+                  VARIANT_PATH: variant.json
                   # Only set for Nightly builds
-                  ED_NIGHTLY: ${{ inputs.version }}
+                  VERSION: ${{ inputs.version }}
 
             - name: Check app was signed & notarised successfully
               if: inputs.sign != ''
@@ -101,9 +152,10 @@ jobs:
             - name: "[Unsigned] Build App"
               if: inputs.sign == ''
               run: |
-                  yarn build:universal --publish never
+                  pnpm build:universal --publish never -m ${{ inputs.targets }}
               env:
                   CSC_IDENTITY_AUTO_DISCOVERY: false
+                  VARIANT_PATH: variant.json
 
             - name: Generate releases.json
               if: inputs.base-url
@@ -133,15 +185,39 @@ jobs:
 
             # We exclude mac-universal as the unpacked app takes forever to upload and zip and dmg already contains it
             - name: Upload Artifacts
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
               with:
-                  name: macos
+                  name: ${{ inputs.artifact-prefix }}macos
                   path: |
                       dist
                       !dist/mac-universal/**
                   retention-days: 1
 
-            - name: Assert all required files are present
+            - name: Assert zip is present
+              if: contains(inputs.targets, 'zip')
+              run: |
+                  test -f ./dist/Element*-mac.zip
+
+            - name: Assert dmg is present
+              if: contains(inputs.targets, 'dmg')
               run: |
                   test -f ./dist/Element*.dmg
-                  test -f ./dist/Element*-mac.zip
+
+    test:
+        name: Test macOS Universal
+        needs: build
+        if: inputs.test && contains(inputs.targets, 'dmg')
+        uses: ./.github/workflows/build_test.yaml
+        with:
+            project: macos
+            artifact: ${{ inputs.artifact-prefix }}macos
+            runs-on: macos-14
+            executable: /Users/runner/Applications/Element*.app/Contents/MacOS/Element*
+            # We need to mount the DMG and copy the app to the Applications folder as a mounted DMG is
+            # read-only and thus would not allow us to override the fuses as is required for Playwright.
+            prepare_cmd: |
+                hdiutil attach ./dist/*.dmg -mountpoint /Volumes/Element &&
+                rsync -a /Volumes/Element/Element*.app ~/Applications/ &&
+                hdiutil detach /Volumes/Element
+            blob_report: ${{ inputs.blob_report }}
+            args: ${{ inputs.test-args }}

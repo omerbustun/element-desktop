@@ -20,6 +20,11 @@ on:
                 required: false
                 default: false
                 description: "Whether the build should be deployed to production"
+            branch-matching:
+                type: boolean
+                required: false
+                default: false
+                description: "Whether the branch name should be matched to find the element-web commit"
         secrets:
             # Required if `nightly` is set
             CF_R2_ACCESS_KEY_ID:
@@ -49,24 +54,49 @@ jobs:
         outputs:
             nightly-version: ${{ steps.versions.outputs.nightly }}
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-            - uses: actions/setup-node@v4
+            - uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
+            - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6
               with:
                   node-version-file: .node-version
-                  cache: "yarn"
+                  cache: "pnpm"
 
             - name: Install Deps
-              run: "yarn install --frozen-lockfile"
+              run: "pnpm install --frozen-lockfile"
 
-            - name: Fetch Element Web
-              run: yarn run fetch --noverify -d ${{ inputs.config }} ${{ inputs.version }}
+            - name: Fetch Element Web (matching branch)
+              id: branch-matching
+              if: inputs.branch-matching
+              continue-on-error: true
+              run: |
+                  scripts/branch-match.sh
+                  cp "$CONFIG_DIR/config.json" element-web/
+                  pnpm --cwd element-web install --frozen-lockfile
+                  pnpm --cwd element-web run build
+                  mv element-web/webapp .
+                  pnpm asar-webapp
+              env:
+                  # These must be set for branch-match.sh to get the right branch
+                  REPOSITORY: ${{ github.repository }}
+                  PR_NUMBER: ${{ github.event.pull_request.number }}
+                  CONFIG_DIR: ${{ inputs.config }}
+
+            - name: Fetch Element Web (${{ inputs.version }})
+              if: steps.branch-matching.outcome == 'failure' || steps.branch-matching.outcome == 'skipped'
+              run: pnpm run fetch --noverify -d ${{ inputs.config }} ${{ inputs.version }}
+
+            - name: Copy variant config
+              run: cp "$CONFIG_DIR/build.json" variant.json
+              env:
+                  CONFIG_DIR: ${{ inputs.config }}
 
             # We split this out to save the build_* scripts having to do it to make use of `hashFiles` in the cache action
             - name: Generate cache hash files
               run: |
+                  set -ex
                   # Add --no-sandbox as otherwise it fails because the helper isn't setuid root. It's only getting the version.
-                  yarn run --silent electron --no-sandbox --version > electronVersion
+                  pnpm --silent electron --no-sandbox --version > electronVersion
                   cat package.json | jq -c .hakDependencies | sha1sum > hakHash
                   find hak -type f -print0 | xargs -0 sha1sum >> hakHash
                   find scripts/hak -type f -print0 | xargs -0 sha1sum >> hakHash
@@ -101,7 +131,7 @@ jobs:
             - name: "[Release] Fetch release"
               id: release
               if: ${{ !inputs.nightly && inputs.version != 'develop' }}
-              uses: cardinalby/git-get-release-action@cedef2faf69cb7c55b285bad07688d04430b7ada # v1
+              uses: cardinalby/git-get-release-action@cedef2faf69cb7c55b285bad07688d04430b7ada # v1.2.4
               env:
                   GITHUB_TOKEN: ${{ github.token }}
               with:
@@ -137,13 +167,13 @@ jobs:
                   echo "| Element Web | [$WEB_VERSION](https://github.com/element-hq/element-web/commit/$WEB_VERSION) |" >> $GITHUB_STEP_SUMMARY
                   echo "| JS SDK      | [$JS_VERSION](https://github.com/matrix-org/matrix-js-sdk/commit/$JS_VERSION) |" >> $GITHUB_STEP_SUMMARY
 
-            - uses: actions/upload-artifact@v4
+            - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
               with:
                   name: webapp
                   retention-days: 1
                   path: |
                       webapp.asar
-                      package.json
                       electronVersion
                       hakHash
                       changelog.Debian
+                      variant.json

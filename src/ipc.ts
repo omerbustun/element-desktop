@@ -1,31 +1,16 @@
 /*
-Copyright 2022-2024 New Vector Ltd.
+Copyright 2022-2025 New Vector Ltd.
 
 SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE files in the repository root for full details.
 */
 
 import { app, autoUpdater, desktopCapturer, ipcMain, powerSaveBlocker, TouchBar, nativeImage } from "electron";
-import { relaunchApp } from "@standardnotes/electron-clear-data";
-import keytar from "keytar-forked";
 
 import IpcMainEvent = Electron.IpcMainEvent;
-import { recordSSOSession } from "./protocol.js";
 import { randomArray } from "./utils.js";
-import { Settings } from "./settings.js";
 import { getDisplayMediaCallback, setDisplayMediaCallback } from "./displayMediaCallback.js";
-
-ipcMain.on("setBadgeCount", function (_ev: IpcMainEvent, count: number): void {
-    if (process.platform !== "win32") {
-        // only set badgeCount on Mac/Linux, the docs say that only those platforms support it but turns out Electron
-        // has some Windows support too, and in some Windows environments this leads to two badges rendering atop
-        // each other. See https://github.com/vector-im/element-web/issues/16942
-        app.badgeCount = count;
-    }
-    if (count === 0) {
-        global.mainWindow?.flashFrame(false);
-    }
-});
+import Store, { clearDataAndRelaunch } from "./store.js";
 
 let focusHandlerAttached = false;
 ipcMain.on("loudNotification", function (): void {
@@ -61,7 +46,8 @@ ipcMain.on("app_onAction", function (_ev: IpcMainEvent, payload) {
 });
 
 ipcMain.on("ipcCall", async function (_ev: IpcMainEvent, payload) {
-    if (!global.mainWindow) return;
+    const store = Store.instance;
+    if (!global.mainWindow || !store) return;
 
     const args = payload.args || [];
     let ret: any;
@@ -70,18 +56,6 @@ ipcMain.on("ipcCall", async function (_ev: IpcMainEvent, payload) {
         case "getUpdateFeedUrl":
             ret = autoUpdater.getFeedURL();
             break;
-        case "getSettingValue": {
-            const [settingName] = args;
-            const setting = Settings[settingName];
-            ret = await setting.read();
-            break;
-        }
-        case "setSettingValue": {
-            const [settingName, value] = args;
-            const setting = Settings[settingName];
-            await setting.write(value);
-            break;
-        }
         case "setLanguage":
             global.appLocalization.setAppLocale(args[0]);
             break;
@@ -96,9 +70,7 @@ ipcMain.on("ipcCall", async function (_ev: IpcMainEvent, payload) {
                 global.mainWindow.focus();
             }
             break;
-        case "getConfig":
-            ret = global.vectorConfig;
-            break;
+
         case "navigateBack":
             if (global.mainWindow.webContents.canGoBack()) {
                 global.mainWindow.webContents.goBack();
@@ -113,11 +85,11 @@ ipcMain.on("ipcCall", async function (_ev: IpcMainEvent, payload) {
             if (typeof args[0] !== "boolean") return;
 
             global.mainWindow.webContents.session.setSpellCheckerEnabled(args[0]);
-            global.store.set("spellCheckerEnabled", args[0]);
+            store.set("spellCheckerEnabled", args[0]);
             break;
 
         case "getSpellCheckEnabled":
-            ret = global.store.get("spellCheckerEnabled", true);
+            ret = store.get("spellCheckerEnabled");
             break;
 
         case "setSpellCheckLanguages":
@@ -135,20 +107,11 @@ ipcMain.on("ipcCall", async function (_ev: IpcMainEvent, payload) {
             ret = global.mainWindow.webContents.session.availableSpellCheckerLanguages;
             break;
 
-        case "startSSOFlow":
-            recordSSOSession(args[0]);
-            break;
-
         case "getPickleKey":
             try {
-                ret = await keytar.getPassword("element.io", `${args[0]}|${args[1]}`);
-                // migrate from riot.im (remove once we think there will no longer be
-                // logins from the time of riot.im)
-                if (ret === null) {
-                    ret = await keytar.getPassword("riot.im", `${args[0]}|${args[1]}`);
-                }
+                ret = await store.getSecret(`${args[0]}|${args[1]}`);
             } catch {
-                // if an error is thrown (e.g. keytar can't connect to the keychain),
+                // if an error is thrown (e.g. we can't initialise safeStorage),
                 // then return null, which means the default pickle key will be used
                 ret = null;
             }
@@ -157,9 +120,7 @@ ipcMain.on("ipcCall", async function (_ev: IpcMainEvent, payload) {
         case "createPickleKey":
             try {
                 const pickleKey = await randomArray(32);
-                // We purposefully throw if keytar is not available so the caller can handle it
-                // rather than sending them a pickle key we did not store on their behalf.
-                await keytar!.setPassword("element.io", `${args[0]}|${args[1]}`, pickleKey);
+                await store.setSecret(`${args[0]}|${args[1]}`, pickleKey);
                 ret = pickleKey;
             } catch (e) {
                 console.error("Failed to create pickle key", e);
@@ -169,11 +130,10 @@ ipcMain.on("ipcCall", async function (_ev: IpcMainEvent, payload) {
 
         case "destroyPickleKey":
             try {
-                await keytar.deletePassword("element.io", `${args[0]}|${args[1]}`);
-                // migrate from riot.im (remove once we think there will no longer be
-                // logins from the time of riot.im)
-                await keytar.deletePassword("riot.im", `${args[0]}|${args[1]}`);
-            } catch {}
+                await store.deleteSecret(`${args[0]}|${args[1]}`);
+            } catch (e) {
+                console.error("Failed to destroy pickle key", e);
+            }
             break;
         case "getDesktopCapturerSources":
             ret = (await desktopCapturer.getSources(args[0])).map((source) => ({
@@ -189,10 +149,7 @@ ipcMain.on("ipcCall", async function (_ev: IpcMainEvent, payload) {
             break;
 
         case "clearStorage":
-            global.store.clear();
-            global.mainWindow.webContents.session.flushStorageData();
-            await global.mainWindow.webContents.session.clearStorageData();
-            relaunchApp();
+            await clearDataAndRelaunch(global.mainWindow.webContents.session);
             return; // the app is about to stop, we don't need to reply to the IPC
 
         case "breadcrumbs": {
@@ -258,4 +215,13 @@ ipcMain.on("ipcCall", async function (_ev: IpcMainEvent, payload) {
         id: payload.id,
         reply: ret,
     });
+});
+
+ipcMain.handle("getConfig", () => global.vectorConfig);
+
+const initialisePromiseWithResolvers = Promise.withResolvers<void>();
+export const initialisePromise = initialisePromiseWithResolvers.promise;
+
+ipcMain.once("initialise", () => {
+    initialisePromiseWithResolvers.resolve();
 });

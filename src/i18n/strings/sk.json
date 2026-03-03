@@ -22,7 +22,9 @@
         "about": "Informácie",
         "brand_help": "%(brand)s Pomoc",
         "help": "Pomocník",
-        "preferences": "Predvoľby"
+        "no": "Nie",
+        "preferences": "Predvoľby",
+        "yes": "Áno"
     },
     "confirm_quit": "Naozaj chcete zavrieť aplikáciu?",
     "edit_menu": {
@@ -30,8 +32,21 @@
         "speech_start_speaking": "Spustiť nahrávanie hlasu",
         "speech_stop_speaking": "Zastaviť nahrávanie hlasu"
     },
+    "eol": {
+        "no_more_updates": "Používate nepodporovanú verziu systému macOS. Prosím, aktualizujte systém, aby ste mohli dostávať aktualizácie aplikácie %(brand)s.",
+        "title": "Systém nie je podporovaný",
+        "warning": "Používate nepodporovanú verziu systému macOS. Vykonajte prosím aktualizáciu, aby aplikácia %(brand)s mohla správne fungovať."
+    },
     "file_menu": {
         "label": "Súbor"
+    },
+    "icon_overlay": {
+        "description_error": "Chyba",
+        "description_notifications": {
+            "one": "Máte %(count)s neprečítané oznámenie.",
+            "few": "Máte %(count)s neprečítané oznámenia.",
+            "other": "Máte %(count)s neprečítaných oznámení."
+        }
     },
     "menu": {
         "hide": "Skryť",
@@ -48,6 +63,21 @@
         "save_image_as": "Uložiť obrázok ako...",
         "save_image_as_error_description": "Obrázok sa nepodarilo uložiť",
         "save_image_as_error_title": "Chyba pri ukladaní obrázka"
+    },
+    "store": {
+        "error": {
+            "backend_changed": "Vymazať údaje a znova načítať?",
+            "backend_changed_detail": "Nepodarilo sa získať prístup k tajnému kľúču zo systémového zväzku kľúčov, zdá sa, že sa zmenil.",
+            "backend_changed_title": "Nepodarilo sa načítať databázu",
+            "backend_no_encryption": "Váš systém má podporovaný zväzok kľúčov, ale šifrovanie nie je k dispozícii.",
+            "backend_no_encryption_detail": "Electron zistil, že šifrovanie nie je k dispozícii na vašom zväzku kľúčov %(backend)s. Uistite sa, že máte nainštalovaný zväzok kľúčov. Ak máte zväzok kľúčov nainštalovaný, reštartujte počítač a skúste to znova. Voliteľne môžete povoliť aplikácii %(brand)s používať slabšiu formu šifrovania.",
+            "backend_no_encryption_title": "Žiadna podpora šifrovania",
+            "unsupported_keyring": "Váš systém má nepodporovaný zväzok kľúčov, čo znamená, že databázu nemožno otvoriť.",
+            "unsupported_keyring_detail": "Detekcia zväzku kľúčov aplikácie Electron nenašla podporovaný backend. Môžete sa pokúsiť manuálne nastaviť backend spustením aplikácie %(brand)s s argumentom príkazového riadka, je to jednorazová operácia. Pozrite si %(link)s .",
+            "unsupported_keyring_title": "Systém nie je podporovaný",
+            "unsupported_keyring_use_basic_text": "Použiť slabšie šifrovanie",
+            "unsupported_keyring_use_plaintext": "Nepoužiť žiadne šifrovanie"
+        }
     },
     "view_menu": {
         "actual_size": "Aktuálna veľkosť",

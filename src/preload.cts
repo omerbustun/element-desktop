@@ -32,6 +32,7 @@ const CHANNELS = [
     "userAccessToken",
     "homeserverUrl",
     "serverSupportedVersions",
+    "showToast",
 ];
 
 contextBridge.exposeInMainWorld("electron", {
@@ -48,5 +49,31 @@ contextBridge.exposeInMainWorld("electron", {
             return;
         }
         ipcRenderer.send(channel, ...args);
+    },
+
+    async initialise(): Promise<{
+        protocol: string;
+        sessionId: string;
+        config: IConfigOptions;
+        supportedSettings: Record<string, boolean>;
+        /**
+         * Do we need to render badge overlays for new notifications?
+         */
+        supportsBadgeOverlay: boolean;
+    }> {
+        ipcRenderer.emit("initialise");
+        const [{ protocol, sessionId }, config, supportedSettings] = await Promise.all([
+            ipcRenderer.invoke("getProtocol"),
+            ipcRenderer.invoke("getConfig"),
+            ipcRenderer.invoke("getSupportedSettings"),
+        ]);
+        return { protocol, sessionId, config, supportedSettings, supportsBadgeOverlay: process.platform === "win32" };
+    },
+
+    async setSettingValue(settingName: string, value: any): Promise<void> {
+        return ipcRenderer.invoke("setSettingValue", settingName, value);
+    },
+    async getSettingValue(settingName: string): Promise<any> {
+        return ipcRenderer.invoke("getSettingValue", settingName);
     },
 });

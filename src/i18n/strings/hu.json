@@ -22,7 +22,9 @@
         "about": "Névjegy",
         "brand_help": "%(brand)s Súgó",
         "help": "Súgó",
-        "preferences": "Beállítások"
+        "no": "Nem",
+        "preferences": "Beállítások",
+        "yes": "Igen"
     },
     "confirm_quit": "Biztos, hogy kilép?",
     "edit_menu": {
@@ -30,8 +32,20 @@
         "speech_start_speaking": "Kezdjen beszélni",
         "speech_stop_speaking": "Fejezze be a beszédet"
     },
+    "eol": {
+        "no_more_updates": "A macOS egy nem támogatott verzióját futtatja. Frissítse, hogy megkapja az %(brand)s új frissítéseit.",
+        "title": "A rendszer nem támogatott",
+        "warning": "A macOS egy nem támogatott verzióját futtatja. Frissítse a rendszert, hogy biztosítsa az %(brand)s további működését."
+    },
     "file_menu": {
         "label": "Fájl"
+    },
+    "icon_overlay": {
+        "description_error": "Hiba",
+        "description_notifications": {
+            "one": "%(count)s olvasatlan értesítése van.",
+            "other": "%(count)s olvasatlan értesítése van."
+        }
     },
     "menu": {
         "hide": "Elrejtés",
@@ -48,6 +62,21 @@
         "save_image_as": "Kép mentése másként…",
         "save_image_as_error_description": "A kép mentése sikertelen",
         "save_image_as_error_title": "Kép mentése sikertelen"
+    },
+    "store": {
+        "error": {
+            "backend_changed": "Adatok törlése és újratöltés?",
+            "backend_changed_detail": "Nem sikerült hozzáférni a rendszerkulcstartó titkos kódjához, úgy tűnik, megváltozott.",
+            "backend_changed_title": "Nem sikerült betölteni az adatbázist",
+            "backend_no_encryption": "A rendszer támogatott kulcstartóval rendelkezik, de a titkosítás nem érhető el.",
+            "backend_no_encryption_detail": "Az Electron észlelte, hogy a titkosítás nem érhető el a(z) %(backend)s kulcstartóján. Győződjön meg róla, hogy telepítve van-e a kulcstartó. Ha telepítve van, indítsa újra és próbálja újra. Esetleg engedélyezheti a gyengébb titkosítást az %(brand)s számára.",
+            "backend_no_encryption_title": "Nincs titkosítási támogatás",
+            "unsupported_keyring": "A rendszer nem támogatott kulcstartóval rendelkezik, ami azt jelenti, hogy az adatbázis nem nyitható meg.",
+            "unsupported_keyring_detail": "Az Electron kulcstartóészlelése nem talált támogatott háttérrendszert. Megpróbálhatja kézileg beállítani a háttérrendszert az %(brand)s egyszeri, parancssori argumentummal való indításával. Lásd: %(link)s.",
+            "unsupported_keyring_title": "A rendszer nem támogatott",
+            "unsupported_keyring_use_basic_text": "Gyengébb titkosítás használata",
+            "unsupported_keyring_use_plaintext": "Ne használjon titkosítást"
+        }
     },
     "view_menu": {
         "actual_size": "Jelenlegi méret",

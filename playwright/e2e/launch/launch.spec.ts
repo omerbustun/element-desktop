@@ -6,8 +6,6 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
 Please see LICENSE files in the repository root for full details.
 */
 
-import { platform } from "node:os";
-
 import { test, expect } from "../../element-desktop-test.js";
 
 declare global {
@@ -17,6 +15,7 @@ declare global {
                   supportsEventIndexing(): Promise<boolean>;
               }
             | undefined;
+        getPickleKey(userId: string, deviceId: string): Promise<string | null>;
         createPickleKey(userId: string, deviceId: string): Promise<string | null>;
     }
 
@@ -48,14 +47,18 @@ test.describe("App launch", () => {
         ).resolves.toBeTruthy();
     });
 
-    test("should launch and render the welcome view successfully and support keytar", async ({ page }) => {
-        test.skip(platform() === "linux", "This test does not yet support Linux");
+    test.describe("safeStorage", () => {
+        const userId = "@user:server";
+        const deviceId = "ABCDEF";
 
-        await expect(
-            page.evaluate<string | null>(async () => {
-                return await window.mxPlatformPeg.get().createPickleKey("@user:server", "ABCDEF");
-            }),
-        ).resolves.not.toBeNull();
+        test("should be supported", async ({ page }) => {
+            await expect(
+                page.evaluate(
+                    ([userId, deviceId]) => window.mxPlatformPeg.get().createPickleKey(userId, deviceId),
+                    [userId, deviceId],
+                ),
+            ).resolves.not.toBeNull();
+        });
     });
 
     test.describe("--no-update", () => {

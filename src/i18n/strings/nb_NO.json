@@ -22,7 +22,9 @@
         "about": "Om",
         "brand_help": "%(brand)s Hjelp",
         "help": "Hjelp",
-        "preferences": "Brukervalg"
+        "no": "Nei",
+        "preferences": "Innstillinger",
+        "yes": "Ja"
     },
     "confirm_quit": "Er du sikker på at du vil slutte?",
     "edit_menu": {
@@ -30,8 +32,20 @@
         "speech_start_speaking": "Begynn å snakke",
         "speech_stop_speaking": "Slutt å snakke"
     },
+    "eol": {
+        "no_more_updates": "Du kjører en versjon av macOS som ikke støttes. Oppgrader for å motta oppdateringer fr %(brand)s.",
+        "title": "Systemet støttes ikke",
+        "warning": "Du bruker en versjon av macOS som ikke støttes. Oppgrader for å sikre at %(brand)s fortsetter å fungere."
+    },
     "file_menu": {
         "label": "Fil"
+    },
+    "icon_overlay": {
+        "description_error": "Feil",
+        "description_notifications": {
+            "one": "Du har %(count)s ulest varsel.",
+            "other": "Du har %(count)s uleste varsler."
+        }
     },
     "menu": {
         "hide": "Skjul",
@@ -48,6 +62,21 @@
         "save_image_as": "Lagre bildet som...",
         "save_image_as_error_description": "Bildet kunne ikke lagres",
         "save_image_as_error_title": "Kunne ikke lagre bildet"
+    },
+    "store": {
+        "error": {
+            "backend_changed": "Tøm data og last inn på nytt?",
+            "backend_changed_detail": "Kan ikke få tilgang til hemmeligheten fra systemnøkkelringen, den ser ut til å ha blitt endret.",
+            "backend_changed_title": "Kunne ikke laste inn databasen",
+            "backend_no_encryption": "Systemet ditt har en støttet nøkkelring, men kryptering er ikke tilgjengelig.",
+            "backend_no_encryption_detail": "Electron har oppdaget at kryptering ikke er tilgjengelig på nøkkelringen %(backend)s din. Forsikre deg om at du har nøkkelringen installert. Hvis du har nøkkelringen installert, vennligst start på nytt og prøv igjen. Eventuelt kan du tillate %(brand)s å bruke en svakere form for kryptering.",
+            "backend_no_encryption_title": "Ingen støtte for kryptering",
+            "unsupported_keyring": "Systemet ditt har en nøkkelring som ikke støttes, noe som betyr at databasen ikke kan åpnes.",
+            "unsupported_keyring_detail": "Electrons nøkkelringdeteksjon fant ikke en støttet backend. Du kan prøve å konfigurere backend manuelt ved å starte %(brand)s med et kommandolinjeargument, en engangsoperasjon. Se%(link)s.",
+            "unsupported_keyring_title": "Systemet støttes ikke",
+            "unsupported_keyring_use_basic_text": "Bruk svakere kryptering",
+            "unsupported_keyring_use_plaintext": "Ikke bruk kryptering"
+        }
     },
     "view_menu": {
         "actual_size": "Faktisk størrelse",

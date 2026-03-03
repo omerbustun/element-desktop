@@ -4,6 +4,10 @@
 on:
     workflow_call:
         inputs:
+            ref:
+                type: string
+                required: false
+                description: "The git ref to checkout, defaults to the default branch"
             arch:
                 type: string
                 required: true
@@ -16,21 +20,66 @@ on:
                 type: string
                 required: true
                 description: "How to link sqlcipher, one of 'system' | 'static'"
+            blob_report:
+                type: boolean
+                required: false
+                description: "Whether to run the blob report"
+            prepare-artifact-name:
+                type: string
+                required: false
+                description: |
+                    The name of the prepare artifact to use, defaults to 'webapp'.
+                    The artifact must contain the following:
+                    + webapp.asar - the asar archive of the webapp to embed in the desktop app
+                    + electronVersion - the version of electron to use for cache keying
+                    + hakHash - the hash of the .hak directory to use for cache keying
+                    + changelog.Debian - the changelog file to embed in the Debian package  
+                    + variant.json - the variant configuration to use for the build
+
+                    The artifact can also contain any additional files which will be applied as overrides to the checkout root before building,
+                    for example icons in the `build/` directory to override the app icons.
+                default: "webapp"
+            test:
+                type: boolean
+                required: false
+                default: true
+                description: "Whether to run the test stage after building"
+            test-args:
+                type: string
+                required: false
+                description: "Additional arguments to pass to playwright"
+            runs-on:
+                type: string
+                required: false
+                description: "The runner image to use, normally set for you, may be needed for running in private repos."
+            artifact-prefix:
+                type: string
+                required: false
+                description: "An optional prefix to add to the artifact name, useful for distinguishing builds in private repos."
+                default: ""
+            targets:
+                type: string
+                required: false
+                description: "List of targets to build"
+                default: "tar.gz deb"
 env:
     SQLCIPHER_BUNDLED: ${{ inputs.sqlcipher == 'static' && '1' || '' }}
     MAX_GLIBC: 2.31 # bullseye-era glibc, used by glibc-check.sh
 permissions: {} # No permissions required
 jobs:
     build:
+        name: Build Linux ${{ inputs.arch }} SQLCipher ${{ inputs.sqlcipher }}
         # We build on native infrastructure as matrix-seshat fails to cross-compile properly
         # https://github.com/matrix-org/seshat/issues/135
-        runs-on: ${{ inputs.arch == 'arm64' && 'ubuntu-22.04-arm' || 'ubuntu-22.04' }}
+        runs-on: ${{ inputs.runs-on || (inputs.arch == 'arm64' && 'ubuntu-22.04-arm' || 'ubuntu-22.04') }}
         env:
             HAK_DOCKER_IMAGE: ghcr.io/element-hq/element-desktop-dockerbuild
         steps:
             - name: Resolve docker image tag for push
               if: github.event_name == 'push'
-              run: echo "HAK_DOCKER_IMAGE=$HAK_DOCKER_IMAGE:$GITHUB_REF_NAME" >> $GITHUB_ENV
+              run: echo "HAK_DOCKER_IMAGE=$HAK_DOCKER_IMAGE:$REF" >> $GITHUB_ENV
+              env:
+                  REF: ${{ inputs.ref || github.ref_name }}
             - name: Resolve docker image tag for release
               if: github.event_name == 'release'
               run: echo "HAK_DOCKER_IMAGE=$HAK_DOCKER_IMAGE:staging" >> $GITHUB_ENV
@@ -56,34 +105,38 @@ jobs:
                         }
                       }
 
-            - uses: actions/checkout@v4
-
-            - uses: actions/download-artifact@v4
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
               with:
-                  name: webapp
+                  repository: element-hq/element-desktop
+                  ref: ${{ inputs.ref }}
+
+            - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+              with:
+                  name: ${{ inputs.prepare-artifact-name }}
 
             - name: Cache .hak
               id: cache
-              uses: actions/cache@v4
+              uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
               with:
                   key: ${{ runner.os }}-${{ github.ref_name }}-${{ inputs.sqlcipher }}-${{ inputs.arch }}-${{ hashFiles('hakHash', 'electronVersion', 'dockerbuild/*') }}
                   path: |
                       ./.hak
 
-            - uses: actions/setup-node@v4
+            - uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
+            - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6
               with:
                   node-version-file: .node-version
-                  cache: "yarn"
+                  cache: "pnpm"
               env:
                   # Workaround for https://github.com/actions/setup-node/issues/317
                   FORCE_COLOR: 0
 
             - name: Install Deps
-              run: "yarn install --frozen-lockfile"
+              run: pnpm install --frozen-lockfile
 
             - name: "Get modified files"
               id: changed_files
-              if: steps.cache.outputs.cache-hit != 'true' && github.event_name == 'pull_request'
+              if: steps.cache.outputs.cache-hit != 'true' && github.event_name == 'pull_request' && github.repository == 'element-hq/element-desktop'
               uses: tj-actions/changed-files@823fcebdb31bb35fdf2229d9f769b400309430d0 # v46
               with:
                   files: |
@@ -91,7 +144,7 @@ jobs:
 
             # This allows contributors to test changes to the dockerbuild image within a pull request
             - name: Build docker image
-              uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6
+              uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
               if: steps.changed_files.outputs.any_modified == 'true'
               with:
                   file: dockerbuild/Dockerfile
@@ -105,11 +158,16 @@ jobs:
                   docker run \
                     -v ${{ github.workspace }}:/work -w /work \
                     -e SQLCIPHER_BUNDLED \
+                    -e CI=1 \
                     $HAK_DOCKER_IMAGE \
-                    yarn build:native
+                    pnpm build:native
 
-            - name: Fix permissions on .hak
-              run: sudo chown -R $USER:$USER .hak
+            - name: Fix permissions
+              run: |
+                  # For .hak
+                  sudo chown -R $USER:$USER .hak
+                  # For node_modules pnpm strict security
+                  sudo chmod +x node_modules/7zip-bin/linux/*/7za
 
             - name: Check native libraries in hak dependencies
               run: |
@@ -125,19 +183,14 @@ jobs:
                       echo "ED_DEBIAN_CHANGELOG=changelog.Debian" >> $GITHUB_ENV
                   fi
 
-            # Workaround for https://github.com/electron-userland/electron-builder/issues/6116
-            - name: Install fpm
-              if: inputs.arch == 'arm64'
-              run: |
-                  sudo apt-get install ruby-dev build-essential
-                  sudo gem install fpm
-                  echo "USE_SYSTEM_FPM=true" >> $GITHUB_ENV
-
             - name: Build App
-              run: yarn build --publish never -l ${{ steps.config.outputs.build-args }}
+              run: pnpm build --publish never ${{ steps.config.outputs.build-args }} -l ${{ inputs.targets }}
               env:
+                  VARIANT_PATH: variant.json
                   # Only set for Nightly builds
-                  ED_NIGHTLY: ${{ inputs.version }}
+                  VERSION: ${{ inputs.version }}
+                  # Workaround for https://github.com/electron-userland/electron-builder/issues/5721
+                  USE_HARD_LINKS: false
 
             - name: Check native libraries
               run: |
@@ -145,11 +198,9 @@ jobs:
                   shopt -s globstar
 
                   FILES=$(file dist/**/*.node)
-                  echo "$FILES"
+                  echo $FILES
 
-                  if [ grep -v "$ARCH" ]; then
-                      exit 1
-                  fi
+                  ! echo "$FILES" | grep -v "$ARCH"
 
                   LIBS=$(readelf -d dist/**/*.node | grep NEEDED)
                   echo "$LIBS"
@@ -169,17 +220,48 @@ jobs:
 
             # We exclude *-unpacked as it loses permissions and the tarball contains it with correct permissions
             - name: Upload Artifacts
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
               with:
-                  name: linux-${{ inputs.arch }}-sqlcipher-${{ inputs.sqlcipher }}
+                  name: ${{ inputs.artifact-prefix }}linux-${{ inputs.arch }}-sqlcipher-${{ inputs.sqlcipher }}
                   path: |
                       dist
                       !dist/*-unpacked/**
                   retention-days: 1
 
-            - name: Assert all required files are present
+            - name: Assert deb is present and valid
+              if: contains(inputs.targets, 'deb')
               run: |
                   test -f ./dist/element-desktop*$ARCH.deb
-                  test -f ./dist/element-desktop*.tar.gz
+
+                  DEB_LISTING=$(dpkg-deb --fsys-tarfile ./dist/element-desktop*.deb | tar -tv)
+                  echo "deb listing: "
+                  echo "$DEB_LISTING"
+                  ! echo "$DEB_LISTING" | grep '^h'
               env:
                   ARCH: ${{ inputs.arch }}
+
+            - name: Assert tar.gz is present
+              if: contains(inputs.targets, 'tar.gz')
+              run: |
+                  test -f ./dist/element-desktop*.tar.gz
+
+                  TAR_GZ_LISTING=$(tar -tvf ./dist/element-desktop*.tar.gz)
+                  echo "tar.gz listing: "
+                  echo "$TAR_GZ_LISTING"
+                  ! echo "$TAR_GZ_LISTING" | grep '^h'
+
+    test:
+        name: Test Linux ${{ inputs.arch }} SQLCipher ${{ inputs.sqlcipher }}
+        needs: build
+        if: inputs.test && contains(inputs.targets, 'deb')
+        uses: ./.github/workflows/build_test.yaml
+        with:
+            project: linux-${{ inputs.arch }}-sqlcipher-${{ inputs.sqlcipher }}
+            artifact: ${{ inputs.artifact-prefix }}linux-${{ inputs.arch }}-sqlcipher-${{ inputs.sqlcipher }}
+            runs-on: ${{ inputs.runs-on || (inputs.arch == 'arm64' && 'ubuntu-22.04-arm' || 'ubuntu-22.04') }}
+            executable: /opt/Element*/element-desktop*
+            prepare_cmd: |
+                sudo apt-get -qq update
+                sudo apt install ./dist/*.deb
+            blob_report: ${{ inputs.blob_report }}
+            args: ${{ inputs.test-args }}

@@ -1,16 +1,12 @@
 import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as plist from "plist";
-import { AfterPackContext, Arch, Configuration as BaseConfiguration, Platform } from "electron-builder";
-import { computeData } from "app-builder-lib/out/asar/integrity";
-import { readFile, writeFile } from "node:fs/promises";
+import { type Configuration as BaseConfiguration, type Protocol } from "electron-builder";
 
 /**
  * This script has different outputs depending on your os platform.
  *
  * On Windows:
- *  Prefixes the nightly version with `0.0.1-nightly.` as it breaks if it is not semver
  *  Passes $ED_SIGNTOOL_THUMBPRINT and $ED_SIGNTOOL_SUBJECT_NAME to
  *      build.win.signtoolOptions.signingHashAlgorithms and build.win.signtoolOptions.certificateSubjectName respectively if specified.
  *
@@ -20,50 +16,74 @@ import { readFile, writeFile } from "node:fs/promises";
  *  Passes $ED_DEBIAN_CHANGELOG to build.deb.fpm if specified
  */
 
-const NIGHTLY_APP_ID = "im.riot.nightly";
-const NIGHTLY_DEB_NAME = "element-nightly";
-
+/**
+ * Interface describing relevant fields of the package.json file.
+ */
 interface Pkg {
+    version: string;
+}
+
+/**
+ * Base metadata fields, used in both package.json and the variant configuration.
+ */
+interface Metadata {
     name: string;
     productName: string;
     description: string;
-    version: string;
+}
+
+/**
+ * Extra metadata fields that are injected into the build to pass to the app at runtime.
+ */
+interface ExtraMetadata extends Metadata {
+    electron_appId: string;
+    electron_protocol: string;
+}
+
+/**
+ * Interface describing the variant configuration format.
+ */
+interface Variant extends Metadata {
+    "appId": string;
+    "linux.executableName"?: string;
+    "linux.deb.name"?: string;
+    "protocols": string[];
 }
 
 type Writable<T> = NonNullable<
     T extends Function ? T : T extends object ? { -readonly [K in keyof T]: Writable<T[K]> } : T
 >;
 
-const pkg: Pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+// Load the default variant as a base configuration
+const DEFAULT_VARIANT = path.join("element.io", "release", "build.json");
+let variant: Variant = JSON.parse(fs.readFileSync(DEFAULT_VARIANT, "utf8"));
+
+/**
+ * If a variant is specified, we will use it to override the build-specific values.
+ * This allows us to have different builds for different purposes (e.g. stable, nightly).
+ */
+if (process.env.VARIANT_PATH) {
+    console.log(`Using variant configuration from '${process.env.VARIANT_PATH}':`);
+    variant = {
+        ...variant,
+        ...JSON.parse(fs.readFileSync(`${process.env.VARIANT_PATH}`, "utf8")),
+    };
+} else {
+    console.warn(`No VARIANT_PATH specified, using default variant configuration '${DEFAULT_VARIANT}':`);
+}
+
+for (const key in variant) {
+    console.log(`${key}: ${variant[key]}`);
+}
 
 interface Configuration extends BaseConfiguration {
-    extraMetadata: Partial<Pick<Pkg, "version">> & Omit<Pkg, "version">;
+    extraMetadata: Partial<Pick<Pkg, "version">> & ExtraMetadata;
     linux: BaseConfiguration["linux"];
     win: BaseConfiguration["win"];
     mac: BaseConfiguration["mac"];
     deb: {
         fpm: string[];
     } & BaseConfiguration["deb"];
-}
-
-async function injectAsarIntegrity(context: AfterPackContext) {
-    const packager = context.packager;
-
-    // We only need to re-generate asar on universal Mac builds, due to https://github.com/electron/universal/issues/116
-    if (packager.platform !== Platform.MAC || context.arch !== Arch.universal) return;
-
-    const resourcesPath = packager.getResourcesDir(context.appOutDir);
-    const asarIntegrity = await computeData({
-        resourcesPath,
-        resourcesRelativePath: "Resources",
-        resourcesDestinationPath: resourcesPath,
-        extraResourceMatchers: [],
-    });
-
-    const plistPath = path.join(resourcesPath, "..", "Info.plist");
-    const data = plist.parse(await readFile(plistPath, "utf8")) as unknown as Writable<plist.PlistObject>;
-    data["ElectronAsarIntegrity"] = asarIntegrity as unknown as Writable<plist.PlistValue>;
-    await writeFile(plistPath, plist.build(data));
 }
 
 /**
@@ -74,7 +94,7 @@ const config: Omit<Writable<Configuration>, "electronFuses"> & {
     // Make all fuses required to ensure they are all explicitly specified
     electronFuses: Required<Configuration["electronFuses"]>;
 } = {
-    appId: "im.riot.app",
+    appId: variant.appId,
     asarUnpack: "**/*.node",
     electronFuses: {
         enableCookieEncryption: true,
@@ -90,9 +110,6 @@ const config: Omit<Writable<Configuration>, "electronFuses"> & {
         loadBrowserProcessSpecificV8Snapshot: false,
         enableEmbeddedAsarIntegrityValidation: true,
     },
-    afterPack: async (context: AfterPackContext) => {
-        await injectAsarIntegrity(context);
-    },
     files: [
         "package.json",
         {
@@ -101,23 +118,19 @@ const config: Omit<Writable<Configuration>, "electronFuses"> & {
         },
         "lib/**",
     ],
-    extraResources: [
-        {
-            from: "res/img",
-            to: "img",
-        },
-        "webapp.asar",
-    ],
+    extraResources: ["build/icon.*", "webapp.asar"],
     extraMetadata: {
-        name: pkg.name,
-        productName: pkg.productName,
-        description: pkg.description,
+        name: variant.name,
+        productName: variant.productName,
+        description: variant.description,
+        electron_appId: variant.appId,
+        electron_protocol: variant.protocols[0],
     },
     linux: {
         target: ["tar.gz", "deb"],
         category: "Network;InstantMessaging;Chat",
-        maintainer: "support@element.io",
-        icon: "build/icons",
+        icon: "icon.png",
+        executableName: variant.name, // element-desktop or element-desktop-nightly
     },
     deb: {
         packageCategory: "net",
@@ -135,32 +148,29 @@ const config: Omit<Writable<Configuration>, "electronFuses"> & {
             "libgbm1",
         ],
         recommends: ["libsqlcipher0", "element-io-archive-keyring"],
-        fpm: [
-            "--deb-field",
-            "Replaces: riot-desktop (<< 1.7.0), riot-web (<< 1.7.0)",
-            "--deb-field",
-            "Breaks: riot-desktop (<< 1.7.0), riot-web (<< 1.7.0)",
-            "--deb-pre-depends",
-            "libc6 (>= 2.31)",
-        ],
+        fpm: ["--deb-pre-depends", "libc6 (>= 2.31)"],
     },
     mac: {
+        target: ["dmg", "zip"],
         category: "public.app-category.social-networking",
         darkModeSupport: true,
         hardenedRuntime: true,
         gatekeeperAssess: true,
-        // XXX: we cannot specify this due to https://github.com/electron/osx-sign/issues/344
-        // strictVerify: true,
+        strictVerify: true,
         entitlements: "./build/entitlements.mac.plist",
-        icon: "build/icons/icon.icns",
+        icon: "build/icon.icon",
         mergeASARs: true,
+        x64ArchFiles: "**/matrix-seshat/*.node", // hak already runs lipo
+    },
+    dmg: {
+        badgeIcon: "build/icon.icon",
     },
     win: {
         target: ["squirrel", "msi"],
         signtoolOptions: {
             signingHashAlgorithms: ["sha256"],
         },
-        icon: "build/icons/icon.ico",
+        icon: "build/icon.ico",
     },
     msi: {
         perMachine: true,
@@ -168,16 +178,27 @@ const config: Omit<Writable<Configuration>, "electronFuses"> & {
     directories: {
         output: "dist",
     },
-    protocols: [
-        {
-            name: "element",
-            schemes: ["io.element.desktop", "element"],
-        },
-    ],
+    protocols: {
+        name: variant.productName,
+        schemes: variant.protocols,
+    },
     nativeRebuilder: "sequential",
     nodeGypRebuild: false,
     npmRebuild: true,
 };
+
+/**
+ * Allow specifying the version via env var.
+ * If unspecified, it will default to the version in package.json.
+ * @param {string} process.env.VERSION
+ */
+if (process.env.VERSION) {
+    config.extraMetadata.version = process.env.VERSION;
+}
+
+if (variant["linux.deb.name"]) {
+    config.deb.fpm.push("--name", variant["linux.deb.name"]);
+}
 
 /**
  * Allow specifying windows signing cert via env vars
@@ -187,31 +208,6 @@ const config: Omit<Writable<Configuration>, "electronFuses"> & {
 if (process.env.ED_SIGNTOOL_SUBJECT_NAME && process.env.ED_SIGNTOOL_THUMBPRINT) {
     config.win.signtoolOptions!.certificateSubjectName = process.env.ED_SIGNTOOL_SUBJECT_NAME;
     config.win.signtoolOptions!.certificateSha1 = process.env.ED_SIGNTOOL_THUMBPRINT;
-}
-
-/**
- * Allow specifying nightly version via env var
- * @param {string} process.env.ED_NIGHTLY
- */
-if (process.env.ED_NIGHTLY) {
-    config.deb.fpm = []; // Clear the fpm as the breaks deb fields don't apply to nightly
-
-    config.appId = NIGHTLY_APP_ID;
-    config.extraMetadata.productName += " Nightly";
-    config.extraMetadata.name += "-nightly";
-    config.extraMetadata.description += " (nightly unstable build)";
-    config.deb.fpm.push("--name", NIGHTLY_DEB_NAME);
-
-    let version = process.env.ED_NIGHTLY;
-    if (os.platform() === "win32") {
-        // The windows packager relies on parsing this as semver, so we have to make it look like one.
-        // This will give our update packages really stupid names, but we probably can't change that either
-        // because squirrel windows parses them for the version too. We don't really care: nobody sees them.
-        // We just give the installer a static name, so you'll just see this in the 'about' dialog.
-        // Turns out if you use 0.0.0 here it makes Squirrel windows crash, so we use 0.0.1.
-        version = "0.0.1-nightly." + version;
-    }
-    config.extraMetadata.version = version;
 }
 
 if (os.platform() === "linux") {

@@ -22,7 +22,9 @@
         "about": "Rakenduse teave",
         "brand_help": "%(brand)s abiteave",
         "help": "Abiteave",
-        "preferences": "Eelistused"
+        "no": "Ei",
+        "preferences": "Eelistused",
+        "yes": "Jah"
     },
     "confirm_quit": "Kas sa kindlasti soovid rakendusest väljuda?",
     "edit_menu": {
@@ -30,8 +32,20 @@
         "speech_start_speaking": "Alusta rääkimist",
         "speech_stop_speaking": "Lõpeta rääkimine"
     },
+    "eol": {
+        "no_more_updates": "Sa kasutad macOS-i toetamata versiooni. %(brand)s rakenduse tulevaste versioonide kasutamiseks palun uuenda operatsioonisüsteemi.",
+        "title": "Süsteem pole toetatud",
+        "warning": "Sa kasutad macOS-i toetamata versiooni. Et %(brand)s toimiks ka edaspidi, palun uuenda operatsioonisüsteemi."
+    },
     "file_menu": {
         "label": "Fail"
+    },
+    "icon_overlay": {
+        "description_error": "Viga",
+        "description_notifications": {
+            "one": "Sul on %(count)s lugemata teavitus",
+            "other": "Sul on %(count)s lugemata teavitust"
+        }
     },
     "menu": {
         "hide": "Peida",
@@ -48,6 +62,21 @@
         "save_image_as": "Salvesta pilt kui...",
         "save_image_as_error_description": "Seda pilti ei õnnestunud salvestada",
         "save_image_as_error_title": "Pildi salvestamine ei õnnestunud"
+    },
+    "store": {
+        "error": {
+            "backend_changed": "Kas kustutame andmed ja laadime uuesti?",
+            "backend_changed_detail": "Süsteemsest võtmerõngast ei õnnestu laadida vajalikku saladust, tundub et ta on muutunud.",
+            "backend_changed_title": "Andmebaasi ei õnnestunud laadida",
+            "backend_no_encryption": "Sinu süsteem kasutab toetatud võtmerõngast, kuid krüptimist pole saadaval.",
+            "backend_no_encryption_detail": "Electron on tuvastanud, et krüptimine pole sinu %(backend)s võtmerõnga jaoks saadaval. Palun kontrolli, et võtmerõngas oleks korrektselt paigaldatud. Kui sul on võtmerõngas paigaldatud, siis palun taaskäivita ta ja proovi uuesti. Lisavõimalusena saad lubada, et %(brand)s kasutab nõrgemat krüptimislahendust.",
+            "backend_no_encryption_title": "Krüptimise tugi puudub",
+            "unsupported_keyring": "Sinu süsteemis on kasutusel mittetoetatud võtmerõnga versioon ning see tähendab, et andmebaasi ei saa avada.",
+            "unsupported_keyring_detail": "Electroni võtmerõnga tuvastamine ei leidnud toetatud taustateenust. Kui käivitad rakenduse %(brand)s käsurealt õigete argumentidega, siis võib taustateenuse käsitsi seadistamine õnnestuda ning seda tegevust peaksid vaid üks kord tegema. Lisateave: %(link)s.",
+            "unsupported_keyring_title": "Süsteem pole toetatud",
+            "unsupported_keyring_use_basic_text": "Kasuta nõrgemat krüptimist",
+            "unsupported_keyring_use_plaintext": "Ära üldse kasuta krüptimist"
+        }
     },
     "view_menu": {
         "actual_size": "Näita tavasuuruses",
