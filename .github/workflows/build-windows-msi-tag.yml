@@ -14,84 +14,81 @@ on:
         description: 'Tag to build (from original repo)'
         required: true
         type: string
+
 jobs:
   build:
     runs-on: windows-2022
     env:
       SIGNTOOL_PATH: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.22000.0/x86/signtool.exe"
       ORIGINAL_REPO: "element-hq/element-desktop"
-    
+
     steps:
       - name: Checkout fork
         uses: actions/checkout@v4
+
       - name: Fetch tag from original repo
         run: |
           git remote add upstream https://github.com/${{ env.ORIGINAL_REPO }}.git
           git fetch upstream --tags
           git checkout ${{ github.event.inputs.tag }}
-      # Set up build tools for 32-bit (using "x86")
+
       - name: Set up build tools (32-bit)
         if: ${{ github.event.inputs.arch == 'ia32' }}
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
         with:
           arch: "x86"
 
-      # Set up build tools for 64-bit
       - name: Set up build tools (64-bit)
         if: ${{ github.event.inputs.arch != 'ia32' }}
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
         with:
           arch: ${{ github.event.inputs.arch }}
 
-      # Install TCL (needed for native modules)
       - name: Install tclsh
         shell: pwsh
         run: |
           choco install -y magicsplat-tcl-tk --no-progress
           echo "${HOME}/AppData/Local/Apps/Tcl86/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # Install NASM (needed for native modules)
       - name: Install NetWide Assembler
         shell: pwsh
         run: |
           choco install -y nasm --no-progress
           echo "C:/Program Files/NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # Install Rust toolchain (common commands)
       - name: Install Rust toolchain
         run: |
           rustup toolchain install stable --profile minimal --no-self-update
           rustup default stable
 
-      # Add Rust target for 32-bit
       - name: Install Rust target (32-bit)
         if: ${{ github.event.inputs.arch == 'ia32' }}
         run: rustup target add i686-pc-windows-msvc
 
-      # Add Rust target for 64-bit
       - name: Install Rust target (64-bit)
         if: ${{ github.event.inputs.arch != 'ia32' }}
         run: rustup target add x86_64-pc-windows-msvc
 
-      - uses: actions/setup-node@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version-file: package.json
-          cache: 'yarn'
 
-      - name: Install Dependencies
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
         run: yarn install --frozen-lockfile
 
       - name: Fetch Element Web
         run: yarn run fetch --noverify --cfgdir ""
 
-      # Build Native Modules for 32-bit
       - name: Build Native Modules (32-bit)
         if: ${{ github.event.inputs.arch == 'ia32' }}
         run: |
           refreshenv
           yarn build:native --target i686-pc-windows-msvc
 
-      # Build Native Modules for 64-bit
       - name: Build Native Modules (64-bit)
         if: ${{ github.event.inputs.arch != 'ia32' }}
         run: |
@@ -103,12 +100,10 @@ jobs:
           yarn run build:ts
           yarn run build:res
 
-      # Build App for 32-bit
       - name: Build App (32-bit)
         if: ${{ github.event.inputs.arch == 'ia32' }}
         run: yarn electron-builder --publish never -w --ia32
 
-      # Build App for 64-bit
       - name: Build App (64-bit)
         if: ${{ github.event.inputs.arch != 'ia32' }}
         run: yarn electron-builder --publish never -w
