@@ -151,6 +151,7 @@ jobs:
                   echo "Building Element Desktop $version"
 
             - name: Validate code signing certificate
+              id: signing_cert
               shell: pwsh
               env:
                   PFX_PATH: ${{ runner.temp }}\codesign.pfx
@@ -171,7 +172,7 @@ jobs:
                       Remove-Item $env:PFX_PATH -Force -ErrorAction SilentlyContinue
                   }
 
-                  Write-Host "Signing certificate: $($cert.Subject)"
+                  Write-Host "Signing certificate thumbprint: $($cert.Thumbprint)"
                   Write-Host "Valid from $($cert.NotBefore.ToString('u')) until $($cert.NotAfter.ToString('u'))"
                   if (-not $cert.HasPrivateKey) {
                       throw "The PFX does not contain a private key"
@@ -179,6 +180,9 @@ jobs:
                   if ($cert.NotAfter -le (Get-Date)) {
                       throw "The code signing certificate expired on $($cert.NotAfter.ToString('u'))"
                   }
+
+                  Add-Content -Path $env:GITHUB_OUTPUT -Value "thumbprint=$($cert.Thumbprint)"
+                  Add-Content -Path $env:GITHUB_OUTPUT -Value "not_after=$($cert.NotAfter.ToString('yyyy-MM-dd'))"
 
             - name: Build MSI
               working-directory: apps/desktop
@@ -190,6 +194,8 @@ jobs:
             - name: Verify MSI and signature
               working-directory: apps/desktop
               shell: pwsh
+              env:
+                  EXPECTED_THUMBPRINT: ${{ steps.signing_cert.outputs.thumbprint }}
               run: |
                   Set-StrictMode -Version 'Latest'
 
@@ -201,21 +207,47 @@ jobs:
                       Write-Host "Built $($msi.FullName) ($size MiB)"
 
                       $sig = Get-AuthenticodeSignature $msi.FullName
-                      $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { "<none>" }
-                      Write-Host "Signature: $($sig.Status) $subject"
-                      if ($env:CSC_LINK -and $sig.Status -ne 'Valid') {
-                          throw "MSI signature is not valid: $($sig.StatusMessage)"
+                      $thumbprint = if ($sig.SignerCertificate) { $sig.SignerCertificate.Thumbprint } else { "<none>" }
+                      $stamper = if ($sig.TimeStamperCertificate) { $sig.TimeStamperCertificate.Thumbprint } else { "<none>" }
+                      Write-Host "Signature: $($sig.Status) $thumbprint"
+                      Write-Host "Timestamp: $stamper"
+
+                      if (-not $env:CSC_LINK) {
+                          Write-Host "No signing certificate configured; not enforcing a signature."
+                          continue
                       }
+
+                      if (-not $sig.SignerCertificate) {
+                          throw "The MSI is not signed"
+                      }
+                      if ($env:EXPECTED_THUMBPRINT -and $sig.SignerCertificate.Thumbprint -ne $env:EXPECTED_THUMBPRINT) {
+                          throw "The MSI was signed by a different certificate than the one configured"
+                      }
+                      if ($sig.Status -eq 'HashMismatch' -or $sig.Status -eq 'NotSigned' -or $sig.Status -eq 'NotSupportedFileFormat') {
+                          throw "The MSI signature is broken: $($sig.StatusMessage)"
+                      }
+                      if (-not $sig.TimeStamperCertificate) {
+                          Write-Warning "The signature does not appear to be timestamped"
+                      }
+
+                      # UnknownError/NotTrusted is expected: the hosted runner does not trust the internal CA.
+                      Write-Host "Signature matches the configured certificate (chain trust: $($sig.Status))."
                   }
 
             - name: Generate checksums
               working-directory: apps/desktop
               shell: pwsh
               run: |
-                  Get-ChildItem dist -Filter *.msi | ForEach-Object {
+                  $lines = Get-ChildItem dist -Filter *.msi | ForEach-Object {
                       $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
                       "$hash  $($_.Name)"
-                  } | Set-Content -Encoding ascii dist/SHA256SUMS.txt
+                  }
+                  $content = ($lines -join "`n") + "`n"
+                  [IO.File]::WriteAllText(
+                      (Join-Path $PWD 'dist/SHA256SUMS.txt'),
+                      $content,
+                      [Text.UTF8Encoding]::new($false)
+                  )
 
             - name: Upload MSI
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -241,6 +273,7 @@ jobs:
                       echo "| Architecture | \`${{ inputs.arch }}\` |"
                       echo "| Config | \`${{ inputs.config }}\` |"
                       echo "| Signed | $signed |"
+                      echo "| Certificate valid until | ${{ steps.signing_cert.outputs.not_after || 'n/a' }} |"
                       echo ""
                       echo "Download \`element-desktop-${{ steps.version.outputs.version }}-${{ inputs.arch }}-msi\` from this run's artifacts."
                   } >> "$GITHUB_STEP_SUMMARY"
