@@ -1,13 +1,7 @@
 name: Sync labels
+# Fork: automatic upstream CI is disabled. This workflow needs upstream bot secrets.
 on:
     workflow_dispatch: {}
-    schedule:
-        - cron: "0 2 * * *" # 2am every day
-    push:
-        branches:
-            - develop
-        paths:
-            - .github/labels.yml
 permissions: {} # Uses ELEMENT_BOT_TOKEN
 jobs:
     sync-labels:

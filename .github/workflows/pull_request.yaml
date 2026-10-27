@@ -1,9 +1,7 @@
 name: Pull Request
+# Fork: automatic upstream CI is disabled. This workflow needs upstream bot secrets.
 on:
-    # Privilege escalation necessary access members of the review teams
-    # 🚨 We must not execute any checked out code here, and be careful around use of user-controlled inputs.
-    pull_request_target: # zizmor: ignore[dangerous-triggers]
-        types: [opened, edited, labeled, unlabeled, synchronize]
+    workflow_dispatch: {}
 permissions: {}
 jobs:
     action:

@@ -1,11 +1,7 @@
 name: Dockerbuild
+# Fork: automatic upstream CI is disabled.
 on:
     workflow_dispatch: {}
-    push:
-        branches: [master, staging, develop]
-        paths:
-            - "dockerbuild/**"
-    pull_request:
 concurrency: ${{ github.workflow }}-${{ github.ref_name }}
 env:
     REGISTRY: ghcr.io

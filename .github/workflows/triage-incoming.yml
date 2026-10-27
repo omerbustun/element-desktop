@@ -1,8 +1,8 @@
 name: Move new issues into Issue triage board
 
+# Fork: automatic upstream CI is disabled. This workflow needs upstream bot secrets.
 on:
-    issues:
-        types: [opened]
+    workflow_dispatch: {}
 
 permissions: {} # Uses ELEMENT_BOT_TOKEN
 

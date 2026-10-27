@@ -1,0 +1,246 @@
+# Build a Windows MSI installer for Element Desktop.
+#
+# Element Desktop lives in the element-hq/element-web monorepo (apps/desktop) since v1.12.14;
+# this element-desktop repository is archived. Element only ships the Squirrel .exe installer,
+# so this workflow builds the .msi directly from a released element-web tag.
+#
+# Run it manually from the Actions tab. Leave `ref` empty to build the latest stable release.
+# The MSI and a SHA256SUMS.txt file are uploaded as a workflow artifact.
+#
+# Optional code signing: set the repository secrets SIGNING_CERT (base64-encoded .pfx)
+# and CERT_PASSWORD. Without them the MSI is built unsigned.
+
+name: Build Windows MSI
+
+on:
+    workflow_dispatch:
+        inputs:
+            ref:
+                description: "element-web tag, branch or commit to build (empty = latest stable release)"
+                required: false
+                type: string
+            arch:
+                description: "Architecture"
+                required: true
+                default: "x64"
+                type: choice
+                options:
+                    - x64
+                    - arm64
+            config:
+                description: "Element config to embed"
+                required: true
+                default: "release"
+                type: choice
+                options:
+                    - release
+                    - none
+
+permissions:
+    contents: read
+
+concurrency:
+    group: windows-msi-${{ inputs.arch }}-${{ inputs.ref || 'latest' }}
+    cancel-in-progress: true
+
+jobs:
+    resolve:
+        name: Resolve source ref
+        runs-on: ubuntu-24.04
+        timeout-minutes: 10
+        outputs:
+            ref: ${{ steps.resolve.outputs.ref }}
+        steps:
+            - name: Resolve element-web ref
+              id: resolve
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  INPUT_REF: ${{ inputs.ref }}
+              run: |
+                  set -euo pipefail
+
+                  ref="$INPUT_REF"
+                  if [ -z "$ref" ]; then
+                      # Newest non-prerelease v* release, excluding module/* tags.
+                      ref=$(gh api 'repos/element-hq/element-web/releases?per_page=30' \
+                          --jq '[.[] | select(.prerelease == false and (.tag_name | startswith("v")))] | .[0].tag_name')
+                      echo "Using latest stable release: $ref"
+                  fi
+
+                  if [ -z "$ref" ] || [ "$ref" = "null" ]; then
+                      echo "::error::Could not determine the latest element-web release"
+                      exit 1
+                  fi
+
+                  # Accept commits as well as tags and branches.
+                  if [[ ! "$ref" =~ ^[0-9a-f]{7,40}$ ]]; then
+                      if ! git ls-remote --exit-code https://github.com/element-hq/element-web.git \
+                          "refs/tags/$ref" "refs/heads/$ref" >/dev/null 2>&1; then
+                          echo "::error::'$ref' is not a tag or branch in element-hq/element-web"
+                          exit 1
+                      fi
+                  fi
+
+                  echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+    build:
+        name: Build MSI (${{ inputs.arch }})
+        needs: resolve
+        runs-on: windows-2025
+        timeout-minutes: 90
+        defaults:
+            run:
+                shell: bash
+        env:
+            CSC_LINK: ${{ secrets.SIGNING_CERT }}
+            CSC_KEY_PASSWORD: ${{ secrets.CERT_PASSWORD }}
+        steps:
+            # Workaround for https://github.com/nrwl/nx/issues/35828
+            - name: Configure git line endings
+              run: |
+                  git config --system core.autocrlf false
+                  git config --system core.eol lf
+
+            - name: Check out element-web
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  repository: element-hq/element-web
+                  ref: ${{ needs.resolve.outputs.ref }}
+                  persist-credentials: false
+
+            - name: Set up pnpm
+              uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+            - name: Set up Node.js
+              uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+              with:
+                  node-version-file: apps/desktop/.node-version
+                  cache: "pnpm"
+
+            # Make pnpm install the prebuilt seshat binaries for the target architecture.
+            - name: Enable native dependencies for ${{ inputs.arch }}
+              if: inputs.arch == 'arm64'
+              run: |
+                  cat >> pnpm-workspace.yaml <<EOF
+
+                  supportedArchitectures:
+                      os: [current]
+                      cpu: [current, arm64]
+                  EOF
+
+            - name: Install desktop dependencies
+              working-directory: apps/desktop
+              run: pnpm install --frozen-lockfile --filter element-desktop
+
+            - name: Fetch Element Web ${{ needs.resolve.outputs.ref }}
+              working-directory: apps/desktop
+              env:
+                  CONFIG_DIR: ${{ inputs.config == 'release' && 'element.io/release' || '' }}
+              run: pnpm run fetch --noverify -d "$CONFIG_DIR"
+
+            - name: Select build variant
+              working-directory: apps/desktop
+              run: cp element.io/release/build.json variant.json
+
+            - name: Read app version
+              id: version
+              working-directory: apps/desktop
+              run: |
+                  version=$(node -p "require('./package.json').version")
+                  echo "version=$version" >> "$GITHUB_OUTPUT"
+                  echo "Building Element Desktop $version"
+
+            - name: Validate code signing certificate
+              shell: pwsh
+              env:
+                  PFX_PATH: ${{ runner.temp }}\codesign.pfx
+              run: |
+                  Set-StrictMode -Version 'Latest'
+
+                  if (-not $env:CSC_LINK) {
+                      Write-Host "No signing certificate configured - the MSI will be unsigned."
+                      exit 0
+                  }
+
+                  $bytes = [Convert]::FromBase64String($env:CSC_LINK)
+                  [IO.File]::WriteAllBytes($env:PFX_PATH, $bytes)
+                  try {
+                      $cert = Get-PfxCertificate -FilePath $env:PFX_PATH `
+                          -Password (ConvertTo-SecureString $env:CSC_KEY_PASSWORD -AsPlainText -Force)
+                  } finally {
+                      Remove-Item $env:PFX_PATH -Force -ErrorAction SilentlyContinue
+                  }
+
+                  Write-Host "Signing certificate: $($cert.Subject)"
+                  Write-Host "Valid from $($cert.NotBefore.ToString('u')) until $($cert.NotAfter.ToString('u'))"
+                  if (-not $cert.HasPrivateKey) {
+                      throw "The PFX does not contain a private key"
+                  }
+                  if ($cert.NotAfter -le (Get-Date)) {
+                      throw "The code signing certificate expired on $($cert.NotAfter.ToString('u'))"
+                  }
+
+            - name: Build MSI
+              working-directory: apps/desktop
+              env:
+                  VARIANT_PATH: variant.json
+                  BUILD_ARGS: ${{ inputs.arch == 'arm64' && '--arm64' || '--x64' }}
+              run: pnpm run build --publish never $BUILD_ARGS -w msi
+
+            - name: Verify MSI and signature
+              working-directory: apps/desktop
+              shell: pwsh
+              run: |
+                  Set-StrictMode -Version 'Latest'
+
+                  $msis = @(Get-ChildItem dist -Filter *.msi)
+                  if ($msis.Count -eq 0) { throw "electron-builder did not produce an MSI" }
+
+                  foreach ($msi in $msis) {
+                      $size = [math]::Round($msi.Length / 1MB, 1)
+                      Write-Host "Built $($msi.FullName) ($size MiB)"
+
+                      $sig = Get-AuthenticodeSignature $msi.FullName
+                      $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { "<none>" }
+                      Write-Host "Signature: $($sig.Status) $subject"
+                      if ($env:CSC_LINK -and $sig.Status -ne 'Valid') {
+                          throw "MSI signature is not valid: $($sig.StatusMessage)"
+                      }
+                  }
+
+            - name: Generate checksums
+              working-directory: apps/desktop
+              shell: pwsh
+              run: |
+                  Get-ChildItem dist -Filter *.msi | ForEach-Object {
+                      $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+                      "$hash  $($_.Name)"
+                  } | Set-Content -Encoding ascii dist/SHA256SUMS.txt
+
+            - name: Upload MSI
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+              with:
+                  name: element-desktop-${{ steps.version.outputs.version }}-${{ inputs.arch }}-msi
+                  path: |
+                      apps/desktop/dist/*.msi
+                      apps/desktop/dist/SHA256SUMS.txt
+                  if-no-files-found: error
+                  retention-days: 30
+
+            - name: Write summary
+              run: |
+                  signed=no
+                  if [ -n "${CSC_LINK:-}" ]; then signed=yes; fi
+
+                  {
+                      echo "### Element Desktop ${{ steps.version.outputs.version }} MSI"
+                      echo ""
+                      echo "| | |"
+                      echo "| --- | --- |"
+                      echo "| Source | \`element-hq/element-web@${{ needs.resolve.outputs.ref }}\` |"
+                      echo "| Architecture | \`${{ inputs.arch }}\` |"
+                      echo "| Config | \`${{ inputs.config }}\` |"
+                      echo "| Signed | $signed |"
+                      echo ""
+                      echo "Download \`element-desktop-${{ steps.version.outputs.version }}-${{ inputs.arch }}-msi\` from this run's artifacts."
+                  } >> "$GITHUB_STEP_SUMMARY"

@@ -1,11 +1,7 @@
 name: Build and Deploy
+# Fork: automatic upstream CI is disabled. This workflow needs upstream secrets and the
+# packages.element.io environment, so it is manual-only. Use build_msi.yml instead.
 on:
-    # Nightly build
-    schedule:
-        - cron: "0 9 * * *"
-    # Release build
-    release:
-        types: [published]
     # Manual nightly & release
     workflow_dispatch:
         inputs:

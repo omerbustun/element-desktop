@@ -1,8 +1,7 @@
 name: Close stale PRs
+# Fork: automatic upstream CI is disabled.
 on:
     workflow_dispatch: {}
-    schedule:
-        - cron: "30 1 * * *"
 permissions: {}
 jobs:
     close:

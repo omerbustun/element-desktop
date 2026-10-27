@@ -1,8 +1,7 @@
 name: Build and Test
+# Fork: automatic upstream CI is disabled.
 on:
-    pull_request: {}
-    push:
-        branches: [develop, staging, master]
+    workflow_dispatch: {}
 concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}
     cancel-in-progress: true

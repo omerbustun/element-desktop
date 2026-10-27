@@ -1,8 +1,8 @@
 name: Move labelled issues to correct projects
 
+# Fork: automatic upstream CI is disabled. This workflow needs upstream bot secrets.
 on:
-    issues:
-        types: [labeled]
+    workflow_dispatch: {}
 
 permissions: {} # Uses ELEMENT_BOT_TOKEN
 

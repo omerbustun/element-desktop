@@ -1,7 +1,6 @@
 name: Release Drafter
+# Fork: automatic upstream CI is disabled. This workflow needs upstream bot secrets.
 on:
-    push:
-        branches: [staging]
     workflow_dispatch: {}
 concurrency: ${{ github.workflow }}
 permissions: {}
